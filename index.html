@@ -42,12 +42,20 @@
          * UTILITIES & CONSTANTS
          */
 
+        // VIEW SETTINGS
+        // We only show the top 75 units of the court (0-75). 
+        // This zooms in on the 3pt line and key.
+        const VIEW_HEIGHT = 75; 
+
+        // Helper to convert Court Y (0-75) to CSS Percentage (0-100)
+        const toPct = (courtY) => (courtY / VIEW_HEIGHT) * 100 + '%';
+
         // Simple distance calculator
         const getDistance = (x1, y1, x2, y2) => {
             return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
         };
 
-        // ROLE DEFINITIONS (Critical for IQ)
+        // ROLE DEFINITIONS
         const ROLES = [
             { id: 1, role: "PG", name: "Point Guard (Chaser)" },
             { id: 2, role: "SG", name: "Shooting Guard (Wing)" },
@@ -56,29 +64,30 @@
             { id: 5, role: "C",  name: "Center (Rim/Anchor)" }
         ];
 
-        // Zone Logic: Defined "Perfect" coordinates (0-100%) for 5 defenders based on ball position
+        // Zone Logic: Coordinates are in COURT UNITS (0-100).
+        // Note: With VIEW_HEIGHT = 75, anything > 75 is off screen.
         const SCENARIOS = [
             {
                 id: 1,
                 name: "Ball at Top of Key",
-                ballPos: { x: 50, y: 75 },
+                ballPos: { x: 50, y: 65 }, // Moved up from 75 to fit in view
                 tips: {
-                    "2-3": "In a 2-3, Guards (1 & 2) must pinch the high post (Elbows) to prevent the entry pass. They shouldn't be too wide!",
-                    "3-2": "The Point (1) pressures the ball. The Wings (2 & 3) drop to the elbows to take away the drive.",
-                    "1-3-1": "The Chaser (1) takes ball. CRITICAL: The Center (5) must be HIGH (Free Throw Line) to deny the high post entry."
+                    "2-3": "In a 2-3, Guards (1 & 2) must pinch the high post (Elbows). Don't get split!",
+                    "3-2": "Point (1) pressures ball. Wings (2 & 3) drop to elbows.",
+                    "1-3-1": "Chaser (1) on ball. Center (5) MUST be high (Free Throw Line)."
                 },
                 zones: {
                     "2-3": [
-                        { id: 1, x: 40, y: 58 }, { id: 2, x: 60, y: 58 }, 
+                        { id: 1, x: 40, y: 55 }, { id: 2, x: 60, y: 55 }, 
                         { id: 3, x: 20, y: 25 }, { id: 4, x: 80, y: 25 }, { id: 5, x: 50, y: 25 }
                     ],
                     "3-2": [
-                        { id: 1, x: 50, y: 62 }, 
-                        { id: 2, x: 30, y: 48 }, { id: 3, x: 70, y: 48 },
+                        { id: 1, x: 50, y: 55 }, 
+                        { id: 2, x: 30, y: 45 }, { id: 3, x: 70, y: 45 },
                         { id: 4, x: 35, y: 20 }, { id: 5, x: 65, y: 20 }
                     ],
                     "1-3-1": [
-                        { id: 1, x: 50, y: 62 }, 
+                        { id: 1, x: 50, y: 58 }, 
                         { id: 2, x: 25, y: 45 }, { id: 3, x: 75, y: 45 },
                         { id: 5, x: 50, y: 42 },
                         { id: 4, x: 50, y: 15 }
@@ -90,9 +99,9 @@
                 name: "Ball on Right Wing",
                 ballPos: { x: 85, y: 60 },
                 tips: {
-                    "2-3": "Strong side guard (2) takes ball. Weak guard (1) drops to elbow. Strong forward (4) comes out slightly. Center (5) fronts post.",
-                    "3-2": "Strong wing (3) takes ball. Point (1) denies return. Strong post (5) fronts. Weak side drops.",
-                    "1-3-1": "Wing (3) takes ball. Chaser (1) denies top return. Center (5) fronts low post. Warrior (4) creates trap."
+                    "2-3": "Strong side guard (2) takes ball. Weak guard (1) drops to elbow. Center (5) fronts post.",
+                    "3-2": "Strong wing (3) takes ball. Point (1) denies return.",
+                    "1-3-1": "Wing (3) takes ball. Chaser (1) denies top return. Warrior (4) creates trap."
                 },
                 zones: {
                     "2-3": [
@@ -114,9 +123,9 @@
                 name: "Ball in Right Corner",
                 ballPos: { x: 92, y: 20 },
                 tips: {
-                    "2-3": "This is the weak spot! Strong forward (4) must sprint to cover. Center (5) drops to block. Guard (2) drops to deny high post.",
-                    "3-2": "Strong post (5) must cover corner. Weak post (4) slides to rim. Wing (3) drops to deny pass back.",
-                    "1-3-1": "The Trap! Warrior (4) and Wing (3) trap the corner. Center (5) denies pass out. Chaser (1) covers foul line.",
+                    "2-3": "Weak spot! Forward (4) sprints to cover. Center (5) drops to block.",
+                    "3-2": "Post (5) covers corner. Weak post (4) slides to rim. Wing (3) denies.",
+                    "1-3-1": "Trap! Warrior (4) and Wing (3) trap corner. Center (5) denies pass out.",
                 },
                 zones: {
                     "2-3": [
@@ -138,9 +147,9 @@
                 name: "Ball High Post (The Nail)",
                 ballPos: { x: 50, y: 45 },
                 tips: {
-                    "2-3": "Emergency! Center (5) steps up. Forwards (3 & 4) pinch in tight. Guards (1 & 2) dig down.",
-                    "3-2": "Center (5) or (4) steps up. Wings collapse. This breaks the 3-2 easily, collapse everyone.",
-                    "1-3-1": "Center (5) plays 1-on-1. Warrior (4) cheats up. Wings (2 & 3) pinch.",
+                    "2-3": "Emergency! Center (5) steps up. Forwards pinch tight. Guards dig.",
+                    "3-2": "Center (5) steps up. Wings collapse. Collapse everyone.",
+                    "1-3-1": "Center (5) plays 1-on-1. Warrior (4) cheats up. Wings pinch.",
                 },
                 zones: {
                     "2-3": [
@@ -187,23 +196,22 @@
             const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
             const [currentZone, setCurrentZone] = useState("2-3");
             const [score, setScore] = useState(0);
-            const [gameState, setGameState] = useState('playing'); // playing, review, complete
+            const [gameState, setGameState] = useState('playing'); 
             const [lastRoundScore, setLastRoundScore] = useState(0);
             const [feedbackText, setFeedbackText] = useState("");
             const [showLegend, setShowLegend] = useState(false);
             
-            // Player Positions State
+            // Initial Positions (Bottom of viewable area, y=70)
             const [players, setPlayers] = useState([
-                { id: 1, x: 45, y: 90 },
-                { id: 2, x: 55, y: 90 },
-                { id: 3, x: 35, y: 90 },
-                { id: 4, x: 65, y: 90 },
-                { id: 5, x: 50, y: 85 }
+                { id: 1, x: 30, y: 70 },
+                { id: 2, x: 40, y: 70 },
+                { id: 3, x: 50, y: 70 },
+                { id: 4, x: 60, y: 70 },
+                { id: 5, x: 70, y: 70 }
             ]);
 
             const courtRef = useRef(null);
 
-            // Load from local storage if available
             useEffect(() => {
                 const saved = localStorage.getItem('defenseIQScore');
                 if (saved) setScore(parseInt(saved));
@@ -211,11 +219,11 @@
 
             const resetPositions = () => {
                 setPlayers([
-                    { id: 1, x: 40, y: 90 },
-                    { id: 2, x: 60, y: 90 },
-                    { id: 3, x: 30, y: 90 },
-                    { id: 4, x: 70, y: 90 },
-                    { id: 5, x: 50, y: 85 }
+                    { id: 1, x: 30, y: 70 },
+                    { id: 2, x: 40, y: 70 },
+                    { id: 3, x: 50, y: 70 },
+                    { id: 4, x: 60, y: 70 },
+                    { id: 5, x: 70, y: 70 }
                 ]);
             };
 
@@ -239,7 +247,6 @@
                 localStorage.setItem('defenseIQScore', 0);
             };
 
-            // Dragging Logic (Pointer Events for Mobile/Desktop Unity)
             const handlePointerDown = (e, playerId) => {
                 e.target.setPointerCapture(e.pointerId);
                 e.target.style.cursor = 'grabbing';
@@ -247,18 +254,19 @@
 
             const handlePointerMove = (e, playerId) => {
                 if (gameState !== 'playing') return;
-                
-                // Check if button is pressed
                 if (e.buttons !== 1) return;
 
                 if (courtRef.current) {
                     const rect = courtRef.current.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width) * 100;
-                    const y = ((e.clientY - rect.top) / rect.height) * 100;
+                    const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+                    const yPct = ((e.clientY - rect.top) / rect.height) * 100;
 
-                    // Clamp values to court boundaries
-                    const clampedX = Math.max(2, Math.min(98, x));
-                    const clampedY = Math.max(2, Math.min(98, y));
+                    // Convert CSS Percent to Court Coordinates (0-75)
+                    const yCourt = (yPct / 100) * VIEW_HEIGHT;
+
+                    // Clamp to court boundaries
+                    const clampedX = Math.max(2, Math.min(98, xPct));
+                    const clampedY = Math.max(2, Math.min(VIEW_HEIGHT - 2, yCourt));
 
                     setPlayers(prev => prev.map(p => 
                         p.id === playerId ? { ...p, x: clampedX, y: clampedY } : p
@@ -276,13 +284,10 @@
                 const correctPositions = scenario.zones[currentZone];
                 
                 let roundScore = 0;
-                let totalDeviation = 0;
                 
-                // Calculate Score
                 players.forEach(p => {
                     const correct = correctPositions.find(cp => cp.id === p.id);
                     const distance = getDistance(p.x, p.y, correct.x, correct.y);
-                    totalDeviation += distance;
                     
                     let pScore = 0;
                     if (distance < 5) pScore = 200;
@@ -332,7 +337,6 @@
                             </div>
                         </div>
                         
-                        {/* Scenario Progress Bar */}
                         <div className="flex gap-1 mb-1">
                             {SCENARIOS.map((_, idx) => (
                                 <div 
@@ -343,7 +347,6 @@
                         </div>
                         <p className="text-xs text-gray-500 text-center">Scenario {currentScenarioIndex + 1} of 5</p>
 
-                        {/* Legend Drawer */}
                         {showLegend && (
                             <div className="mt-2 bg-gray-50 p-2 rounded text-xs border border-gray-200 grid grid-cols-2 gap-1">
                                 {ROLES.map(r => (
@@ -368,17 +371,17 @@
                                     <p className="text-sm text-gray-600">Defend: <span className="font-semibold text-orange-600">{currentScenario.name}</span></p>
                                 </div>
 
-                                {/* WHITEBOARD / COURT */}
+                                {/* WHITEBOARD / COURT (Aspect 4/3 matches 100/75 viewBox) */}
                                 <div 
                                     ref={courtRef}
-                                    className="relative w-full aspect-[3/4] bg-white rounded-xl shadow-lg border-4 border-gray-800 overflow-hidden touch-none"
+                                    className="relative w-full aspect-[4/3] bg-white rounded-xl shadow-lg border-4 border-gray-800 overflow-hidden touch-none"
                                     style={{
                                         backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)',
                                         backgroundSize: '20px 20px'
                                     }}
                                 >
-                                    {/* COURT MARKINGS (SVG) - Basket at TOP, Offense attacks UP */}
-                                    <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+                                    {/* SVG ViewBox 0 0 100 75 cuts off bottom 25% of court */}
+                                    <svg viewBox={`0 0 100 ${VIEW_HEIGHT}`} className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
                                         <line x1="0" y1="98" x2="100" y2="98" stroke="black" strokeWidth="1" />
                                         <rect x="35" y="0" width="30" height="38" fill="none" stroke="black" strokeWidth="1" />
                                         <path d="M 35 38 A 15 15 0 0 0 65 38" fill="none" stroke="black" strokeWidth="1" strokeDasharray="4 4" />
@@ -390,18 +393,17 @@
 
                                     {/* OFFENSIVE BALL */}
                                     <div 
-                                        className="absolute w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold shadow-md transform -translate-x-1/2 -translate-y-1/2 z-10 border-2 border-white animate-pulse"
-                                        style={{ left: `${currentScenario.ballPos.x}%`, top: `${currentScenario.ballPos.y}%` }}
+                                        className="absolute w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs shadow-sm transform -translate-x-1/2 -translate-y-1/2 z-10"
+                                        style={{ left: `${currentScenario.ballPos.x}%`, top: toPct(currentScenario.ballPos.y) }}
                                     >
-                                        🏀
                                     </div>
 
-                                    {/* CORRECT POSITIONS (GHOSTS) - SHOWN ONLY IN REVIEW */}
+                                    {/* CORRECT POSITIONS (GHOSTS) */}
                                     {gameState === 'review' && currentScenario.zones[currentZone].map((pos) => (
                                         <div
                                             key={`ghost-${pos.id}`}
                                             className="absolute w-10 h-10 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 opacity-60 z-0"
-                                            style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                            style={{ left: `${pos.x}%`, top: toPct(pos.y) }}
                                         >
                                             <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                                         </div>
@@ -413,14 +415,17 @@
                                         
                                         return (
                                             <React.Fragment key={player.id}>
-                                                {/* Connection Line in Review Mode */}
+                                                {/* Line */}
                                                 {gameState === 'review' && correct && (
                                                     <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                                                        {/* We must render line coords in VIEWBOX space or CSS Percentage space? 
+                                                            SVG lines inside a viewBox 100x75 need court coordinates directly. 
+                                                            Since this SVG shares the main viewBox, we can use raw coordinates! */}
                                                         <line 
-                                                            x1={`${player.x}%`} y1={`${player.y}%`} 
-                                                            x2={`${correct.x}%`} y2={`${correct.y}%`} 
+                                                            x1={`${player.x}`} y1={`${player.y}`} 
+                                                            x2={`${correct.x}`} y2={`${correct.y}`} 
                                                             stroke={getDistance(player.x, player.y, correct.x, correct.y) < 15 ? "green" : "red"} 
-                                                            strokeWidth="2" 
+                                                            strokeWidth="0.5" 
                                                             strokeDasharray="4 2"
                                                         />
                                                     </svg>
@@ -437,7 +442,7 @@
                                                         }`}
                                                     style={{ 
                                                         left: `${player.x}%`, 
-                                                        top: `${player.y}%`,
+                                                        top: toPct(player.y), // Convert court unit to CSS %
                                                     }}
                                                 >
                                                     {player.id}
@@ -471,7 +476,6 @@
                                     )}
                                 </div>
 
-                                {/* ACTIONS */}
                                 <div className="w-full mt-4 pb-8">
                                     {gameState === 'playing' ? (
                                         <button 
@@ -518,7 +522,6 @@
                         )}
                     </div>
                     
-                    {/* FOOTER */}
                     <div className="w-full text-center py-4 text-xs text-gray-400 bg-white border-t border-gray-100">
                         Defense IQ Trainer v1.1 • Feature: Gameplay
                     </div>
