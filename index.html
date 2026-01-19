@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Defense IQ Trainer</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM & Lucide Icons via Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.263.1"
+        }
+    }
+    </script>
+    
+    <!-- Babel for JSX compilation in browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Prevent pull-to-refresh on mobile to improve dragging experience */
+        body {
+            overscroll-behavior: none;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen w-screen overflow-hidden">
+    <div id="root" class="h-full w-full flex justify-center"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle } from 'lucide-react';
+
+        /**
+         * UTILITIES & CONSTANTS
+         */
+
+        // Simple distance calculator
+        const getDistance = (x1, y1, x2, y2) => {
+            return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        };
+
+        // ROLE DEFINITIONS (Critical for IQ)
+        const ROLES = [
+            { id: 1, role: "PG", name: "Point Guard (Chaser)" },
+            { id: 2, role: "SG", name: "Shooting Guard (Wing)" },
+            { id: 3, role: "SF", name: "Small Forward (Wing)" },
+            { id: 4, role: "PF", name: "Power Forward (Post)" },
+            { id: 5, role: "C",  name: "Center (Rim/Anchor)" }
+        ];
+
+        // Zone Logic: Defined "Perfect" coordinates (0-100%) for 5 defenders based on ball position
+        const SCENARIOS = [
+            {
+                id: 1,
+                name: "Ball at Top of Key",
+                ballPos: { x: 50, y: 75 },
+                tips: {
+                    "2-3": "In a 2-3, Guards (1 & 2) must pinch the high post (Elbows) to prevent the entry pass. They shouldn't be too wide!",
+                    "3-2": "The Point (1) pressures the ball. The Wings (2 & 3) drop to the elbows to take away the drive.",
+                    "1-3-1": "The Chaser (1) takes ball. CRITICAL: The Center (5) must be HIGH (Free Throw Line) to deny the high post entry."
+                },
+                zones: {
+                    "2-3": [
+                        { id: 1, x: 40, y: 58 }, { id: 2, x: 60, y: 58 }, 
+                        { id: 3, x: 20, y: 25 }, { id: 4, x: 80, y: 25 }, { id: 5, x: 50, y: 25 }
+                    ],
+                    "3-2": [
+                        { id: 1, x: 50, y: 62 }, 
+                        { id: 2, x: 30, y: 48 }, { id: 3, x: 70, y: 48 },
+                        { id: 4, x: 35, y: 20 }, { id: 5, x: 65, y: 20 }
+                    ],
+                    "1-3-1": [
+                        { id: 1, x: 50, y: 62 }, 
+                        { id: 2, x: 25, y: 45 }, { id: 3, x: 75, y: 45 },
+                        { id: 5, x: 50, y: 42 },
+                        { id: 4, x: 50, y: 15 }
+                    ]
+                }
+            },
+            {
+                id: 2,
+                name: "Ball on Right Wing",
+                ballPos: { x: 85, y: 60 },
+                tips: {
+                    "2-3": "Strong side guard (2) takes ball. Weak guard (1) drops to elbow. Strong forward (4) comes out slightly. Center (5) fronts post.",
+                    "3-2": "Strong wing (3) takes ball. Point (1) denies return. Strong post (5) fronts. Weak side drops.",
+                    "1-3-1": "Wing (3) takes ball. Chaser (1) denies top return. Center (5) fronts low post. Warrior (4) creates trap."
+                },
+                zones: {
+                    "2-3": [
+                        { id: 2, x: 75, y: 50 }, { id: 1, x: 50, y: 45 },
+                        { id: 4, x: 80, y: 30 }, { id: 5, x: 60, y: 25 }, { id: 3, x: 20, y: 25 }
+                    ],
+                    "3-2": [
+                        { id: 3, x: 75, y: 50 }, { id: 1, x: 60, y: 55 },
+                        { id: 2, x: 35, y: 40 }, { id: 5, x: 80, y: 25 }, { id: 4, x: 50, y: 25 }
+                    ],
+                    "1-3-1": [
+                        { id: 3, x: 75, y: 55 }, { id: 1, x: 60, y: 65 },
+                        { id: 5, x: 65, y: 40 }, { id: 4, x: 85, y: 20 }, { id: 2, x: 50, y: 30 }
+                    ]
+                }
+            },
+            {
+                id: 3,
+                name: "Ball in Right Corner",
+                ballPos: { x: 92, y: 20 },
+                tips: {
+                    "2-3": "This is the weak spot! Strong forward (4) must sprint to cover. Center (5) drops to block. Guard (2) drops to deny high post.",
+                    "3-2": "Strong post (5) must cover corner. Weak post (4) slides to rim. Wing (3) drops to deny pass back.",
+                    "1-3-1": "The Trap! Warrior (4) and Wing (3) trap the corner. Center (5) denies pass out. Chaser (1) covers foul line.",
+                },
+                zones: {
+                    "2-3": [
+                        { id: 4, x: 85, y: 25 }, { id: 5, x: 65, y: 20 },
+                        { id: 2, x: 75, y: 40 }, { id: 3, x: 50, y: 20 }, { id: 1, x: 50, y: 50 }
+                    ],
+                    "3-2": [
+                        { id: 5, x: 85, y: 25 }, { id: 4, x: 60, y: 20 },
+                        { id: 3, x: 80, y: 45 }, { id: 1, x: 50, y: 45 }, { id: 2, x: 30, y: 30 }
+                    ],
+                    "1-3-1": [
+                        { id: 4, x: 88, y: 25 }, { id: 3, x: 82, y: 35 },
+                        { id: 5, x: 70, y: 25 }, { id: 1, x: 60, y: 50 }, { id: 2, x: 50, y: 20 }
+                    ]
+                }
+            },
+            {
+                id: 4,
+                name: "Ball High Post (The Nail)",
+                ballPos: { x: 50, y: 45 },
+                tips: {
+                    "2-3": "Emergency! Center (5) steps up. Forwards (3 & 4) pinch in tight. Guards (1 & 2) dig down.",
+                    "3-2": "Center (5) or (4) steps up. Wings collapse. This breaks the 3-2 easily, collapse everyone.",
+                    "1-3-1": "Center (5) plays 1-on-1. Warrior (4) cheats up. Wings (2 & 3) pinch.",
+                },
+                zones: {
+                    "2-3": [
+                        { id: 5, x: 50, y: 35 }, { id: 3, x: 30, y: 25 },
+                        { id: 4, x: 70, y: 25 }, { id: 1, x: 40, y: 50 }, { id: 2, x: 60, y: 50 }
+                    ],
+                    "3-2": [
+                        { id: 4, x: 45, y: 35 }, { id: 5, x: 55, y: 35 },
+                        { id: 1, x: 50, y: 60 }, { id: 2, x: 30, y: 45 }, { id: 3, x: 70, y: 45 }
+                    ],
+                    "1-3-1": [
+                        { id: 5, x: 50, y: 38 }, { id: 1, x: 50, y: 60 },
+                        { id: 2, x: 35, y: 45 }, { id: 3, x: 65, y: 45 }, { id: 4, x: 50, y: 20 }
+                    ]
+                }
+            },
+            {
+                id: 5,
+                name: "Ball Left Wing (Deep)",
+                ballPos: { x: 15, y: 55 },
+                tips: {
+                    "2-3": "Forward (3) steps out. Guard (1) drops to elbow. Center (5) fronts post.",
+                    "3-2": "Wing (2) takes ball. Point (1) gaps. Post (4) fronts.",
+                    "1-3-1": "Wing (2) takes ball. Chaser (1) denies top. Center (5) fronts.",
+                },
+                zones: {
+                    "2-3": [
+                        { id: 3, x: 25, y: 45 }, { id: 1, x: 40, y: 40 },
+                        { id: 2, x: 70, y: 40 }, { id: 5, x: 35, y: 25 }, { id: 4, x: 60, y: 25 }
+                    ],
+                    "3-2": [
+                        { id: 2, x: 25, y: 50 }, { id: 1, x: 40, y: 55 },
+                        { id: 3, x: 70, y: 40 }, { id: 4, x: 30, y: 25 }, { id: 5, x: 60, y: 25 }
+                    ],
+                    "1-3-1": [
+                        { id: 2, x: 25, y: 50 }, { id: 1, x: 40, y: 60 },
+                        { id: 5, x: 35, y: 35 }, { id: 4, x: 20, y: 20 }, { id: 3, x: 60, y: 30 }
+                    ]
+                }
+            }
+        ];
+
+        function DefenseIQApp() {
+            const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
+            const [currentZone, setCurrentZone] = useState("2-3");
+            const [score, setScore] = useState(0);
+            const [gameState, setGameState] = useState('playing'); // playing, review, complete
+            const [lastRoundScore, setLastRoundScore] = useState(0);
+            const [feedbackText, setFeedbackText] = useState("");
+            const [showLegend, setShowLegend] = useState(false);
+            
+            // Player Positions State
+            const [players, setPlayers] = useState([
+                { id: 1, x: 45, y: 90 },
+                { id: 2, x: 55, y: 90 },
+                { id: 3, x: 35, y: 90 },
+                { id: 4, x: 65, y: 90 },
+                { id: 5, x: 50, y: 85 }
+            ]);
+
+            const courtRef = useRef(null);
+
+            // Load from local storage if available
+            useEffect(() => {
+                const saved = localStorage.getItem('defenseIQScore');
+                if (saved) setScore(parseInt(saved));
+            }, []);
+
+            const resetPositions = () => {
+                setPlayers([
+                    { id: 1, x: 40, y: 90 },
+                    { id: 2, x: 60, y: 90 },
+                    { id: 3, x: 30, y: 90 },
+                    { id: 4, x: 70, y: 90 },
+                    { id: 5, x: 50, y: 85 }
+                ]);
+            };
+
+            const nextScenario = () => {
+                if (currentScenarioIndex < SCENARIOS.length - 1) {
+                    setCurrentScenarioIndex(prev => prev + 1);
+                    setGameState('playing');
+                    resetPositions();
+                    const zones = ["2-3", "3-2", "1-3-1"];
+                    setCurrentZone(zones[Math.floor(Math.random() * zones.length)]);
+                } else {
+                    setGameState('complete');
+                }
+            };
+
+            const restartGame = () => {
+                setCurrentScenarioIndex(0);
+                setScore(0);
+                setGameState('playing');
+                resetPositions();
+                localStorage.setItem('defenseIQScore', 0);
+            };
+
+            // Dragging Logic (Pointer Events for Mobile/Desktop Unity)
+            const handlePointerDown = (e, playerId) => {
+                e.target.setPointerCapture(e.pointerId);
+                e.target.style.cursor = 'grabbing';
+            };
+
+            const handlePointerMove = (e, playerId) => {
+                if (gameState !== 'playing') return;
+                
+                // Check if button is pressed
+                if (e.buttons !== 1) return;
+
+                if (courtRef.current) {
+                    const rect = courtRef.current.getBoundingClientRect();
+                    const x = ((e.clientX - rect.left) / rect.width) * 100;
+                    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+                    // Clamp values to court boundaries
+                    const clampedX = Math.max(2, Math.min(98, x));
+                    const clampedY = Math.max(2, Math.min(98, y));
+
+                    setPlayers(prev => prev.map(p => 
+                        p.id === playerId ? { ...p, x: clampedX, y: clampedY } : p
+                    ));
+                }
+            };
+
+            const handlePointerUp = (e) => {
+                e.target.style.cursor = 'grab';
+                e.target.releasePointerCapture(e.pointerId);
+            };
+
+            const submitRound = () => {
+                const scenario = SCENARIOS[currentScenarioIndex];
+                const correctPositions = scenario.zones[currentZone];
+                
+                let roundScore = 0;
+                let totalDeviation = 0;
+                
+                // Calculate Score
+                players.forEach(p => {
+                    const correct = correctPositions.find(cp => cp.id === p.id);
+                    const distance = getDistance(p.x, p.y, correct.x, correct.y);
+                    totalDeviation += distance;
+                    
+                    let pScore = 0;
+                    if (distance < 5) pScore = 200;
+                    else if (distance < 15) pScore = 200 - ((distance - 5) * 10);
+                    else pScore = Math.max(0, 100 - ((distance - 15) * 5));
+                    
+                    roundScore += Math.floor(pScore);
+                });
+
+                setLastRoundScore(roundScore);
+                setScore(prev => {
+                    const newScore = prev + roundScore;
+                    localStorage.setItem('defenseIQScore', newScore);
+                    return newScore;
+                });
+                setFeedbackText(scenario.tips[currentZone]);
+                setGameState('review');
+            };
+
+            const copyResults = () => {
+                const text = `🏀 Defense IQ Results 🏀\nPoints: ${score}\nCompleted: ${SCENARIOS.length} Scenarios\n\nThink you can beat me?`;
+                navigator.clipboard.writeText(text);
+                alert("Score copied to clipboard! Share it with the team.");
+            };
+
+            const currentScenario = SCENARIOS[currentScenarioIndex];
+
+            return (
+                <div className="flex flex-col items-center min-h-screen font-sans selection:bg-orange-200">
+                    
+                    {/* HEADER */}
+                    <div className="w-full max-w-md bg-white p-4 shadow-sm border-b border-gray-200 sticky top-0 z-20">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <Clipboard className="w-5 h-5" /> Defense IQ
+                            </h1>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setShowLegend(!showLegend)}
+                                    className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 hover:bg-gray-200"
+                                >
+                                    <HelpCircle className="w-3 h-3" /> Roles
+                                </button>
+                                <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1">
+                                    <Trophy className="w-3 h-3" /> {score}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Scenario Progress Bar */}
+                        <div className="flex gap-1 mb-1">
+                            {SCENARIOS.map((_, idx) => (
+                                <div 
+                                    key={idx} 
+                                    className={`h-1 flex-1 rounded-full ${idx <= currentScenarioIndex ? 'bg-orange-500' : 'bg-gray-200'}`}
+                                />
+                            ))}
+                        </div>
+                        <p className="text-xs text-gray-500 text-center">Scenario {currentScenarioIndex + 1} of 5</p>
+
+                        {/* Legend Drawer */}
+                        {showLegend && (
+                            <div className="mt-2 bg-gray-50 p-2 rounded text-xs border border-gray-200 grid grid-cols-2 gap-1">
+                                {ROLES.map(r => (
+                                    <div key={r.id} className="flex items-center gap-2">
+                                        <span className="bg-blue-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{r.id}</span>
+                                        <span className="text-gray-600">{r.role}</span>
+                                    </div>
+                                ))}
+                                <div className="col-span-2 text-center text-gray-400 italic mt-1">1-3-1: 1 is Chaser, 4 is Warrior</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* GAME AREA */}
+                    <div className="w-full max-w-md p-4 flex-grow flex flex-col items-center">
+                        
+                        {gameState !== 'complete' ? (
+                            <React.Fragment>
+                                <div className="bg-white p-4 rounded-lg shadow-sm w-full mb-4 text-center border border-gray-200">
+                                    <span className="block text-xs uppercase tracking-wider text-gray-400 font-bold mb-1">Mission</span>
+                                    <h2 className="text-2xl font-black text-gray-800 mb-1">{currentZone} ZONE</h2>
+                                    <p className="text-sm text-gray-600">Defend: <span className="font-semibold text-orange-600">{currentScenario.name}</span></p>
+                                </div>
+
+                                {/* WHITEBOARD / COURT */}
+                                <div 
+                                    ref={courtRef}
+                                    className="relative w-full aspect-[3/4] bg-white rounded-xl shadow-lg border-4 border-gray-800 overflow-hidden touch-none"
+                                    style={{
+                                        backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)',
+                                        backgroundSize: '20px 20px'
+                                    }}
+                                >
+                                    {/* COURT MARKINGS (SVG) - Basket at TOP, Offense attacks UP */}
+                                    <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+                                        <line x1="0" y1="98" x2="100" y2="98" stroke="black" strokeWidth="1" />
+                                        <rect x="35" y="0" width="30" height="38" fill="none" stroke="black" strokeWidth="1" />
+                                        <path d="M 35 38 A 15 15 0 0 0 65 38" fill="none" stroke="black" strokeWidth="1" strokeDasharray="4 4" />
+                                        <path d="M 35 38 A 15 15 0 0 1 65 38" fill="none" stroke="black" strokeWidth="1" />
+                                        <path d="M 10 0 L 10 15 A 40 40 0 0 0 90 15 L 90 0" fill="none" stroke="black" strokeWidth="1" />
+                                        <line x1="45" y1="4" x2="55" y2="4" stroke="black" strokeWidth="1" />
+                                        <circle cx="50" cy="7" r="1.5" stroke="black" strokeWidth="1" fill="none" />
+                                    </svg>
+
+                                    {/* OFFENSIVE BALL */}
+                                    <div 
+                                        className="absolute w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold shadow-md transform -translate-x-1/2 -translate-y-1/2 z-10 border-2 border-white animate-pulse"
+                                        style={{ left: `${currentScenario.ballPos.x}%`, top: `${currentScenario.ballPos.y}%` }}
+                                    >
+                                        🏀
+                                    </div>
+
+                                    {/* CORRECT POSITIONS (GHOSTS) - SHOWN ONLY IN REVIEW */}
+                                    {gameState === 'review' && currentScenario.zones[currentZone].map((pos) => (
+                                        <div
+                                            key={`ghost-${pos.id}`}
+                                            className="absolute w-10 h-10 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 opacity-60 z-0"
+                                            style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                        >
+                                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                        </div>
+                                    ))}
+
+                                    {/* PLAYERS (DRAGGABLE) */}
+                                    {players.map((player) => {
+                                        const correct = gameState === 'review' ? currentScenario.zones[currentZone].find(p => p.id === player.id) : null;
+                                        
+                                        return (
+                                            <React.Fragment key={player.id}>
+                                                {/* Connection Line in Review Mode */}
+                                                {gameState === 'review' && correct && (
+                                                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                                                        <line 
+                                                            x1={`${player.x}%`} y1={`${player.y}%`} 
+                                                            x2={`${correct.x}%`} y2={`${correct.y}%`} 
+                                                            stroke={getDistance(player.x, player.y, correct.x, correct.y) < 15 ? "green" : "red"} 
+                                                            strokeWidth="2" 
+                                                            strokeDasharray="4 2"
+                                                        />
+                                                    </svg>
+                                                )}
+
+                                                <div
+                                                    onPointerDown={(e) => handlePointerDown(e, player.id)}
+                                                    onPointerMove={(e) => handlePointerMove(e, player.id)}
+                                                    onPointerUp={handlePointerUp}
+                                                    className={`absolute w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-lg transform -translate-x-1/2 -translate-y-1/2 transition-all cursor-grab touch-none z-20
+                                                        ${gameState === 'review' 
+                                                            ? 'bg-gray-200 text-gray-500 border-2 border-gray-400 scale-75' 
+                                                            : 'bg-blue-600 text-white border-2 border-white hover:scale-110 active:scale-110 active:shadow-xl active:bg-blue-500'
+                                                        }`}
+                                                    style={{ 
+                                                        left: `${player.x}%`, 
+                                                        top: `${player.y}%`,
+                                                    }}
+                                                >
+                                                    {player.id}
+                                                </div>
+                                            </React.Fragment>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* INSTRUCTIONS / FEEDBACK AREA */}
+                                <div className="w-full mt-4">
+                                    {gameState === 'playing' ? (
+                                        <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg flex items-start gap-3">
+                                            <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                            <p className="text-sm text-blue-800">
+                                                Drag the 5 blue players to their correct spots for a 
+                                                <span className="font-bold mx-1">{currentZone}</span> 
+                                                defense against the ball position.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-green-50 border border-green-200 p-4 rounded-lg animate-in slide-in-from-bottom-2 duration-300">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-800 text-lg">Round Score: +{lastRoundScore}</span>
+                                                <span className="text-xs text-green-600 uppercase font-bold tracking-wide">Coach says:</span>
+                                            </div>
+                                            <p className="text-sm text-gray-700 italic border-l-4 border-green-500 pl-3 mb-2">
+                                                "{feedbackText}"
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* ACTIONS */}
+                                <div className="w-full mt-4 pb-8">
+                                    {gameState === 'playing' ? (
+                                        <button 
+                                            onClick={submitRound}
+                                            className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            Submit Defense <ChevronRight />
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={nextScenario}
+                                            className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-orange-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            Next Drill <ChevronRight />
+                                        </button>
+                                    )}
+                                </div>
+                            </React.Fragment>
+                        ) : (
+                            /* COMPLETION SCREEN */
+                            <div className="flex flex-col items-center justify-center h-full w-full py-10 animate-in zoom-in duration-300">
+                                <Trophy className="w-24 h-24 text-yellow-500 mb-6 drop-shadow-md" />
+                                <h2 className="text-3xl font-black text-gray-900 mb-2">Drills Complete!</h2>
+                                <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 text-center w-full mb-6">
+                                    <span className="block text-gray-500 text-sm uppercase font-bold tracking-wider mb-2">Final IQ Score</span>
+                                    <span className="block text-6xl font-black text-orange-600 mb-2">{score}</span>
+                                    <span className="block text-sm text-gray-400">out of 5000</span>
+                                </div>
+                                
+                                <button 
+                                    onClick={copyResults}
+                                    className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2 mb-3"
+                                >
+                                    <Share2 className="w-5 h-5" /> Copy Score to Team Chat
+                                </button>
+                                
+                                <button 
+                                    onClick={restartGame}
+                                    className="w-full bg-white text-gray-600 py-3 rounded-xl font-semibold border-2 border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
+                                >
+                                    <RefreshCw className="w-4 h-4" /> Try Again
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* FOOTER */}
+                    <div className="w-full text-center py-4 text-xs text-gray-400 bg-white border-t border-gray-100">
+                        Defense IQ Trainer v1.1 • Feature: Gameplay
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<DefenseIQApp />);
+    </script>
+</body>
+</html>
