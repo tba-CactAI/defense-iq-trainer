@@ -46,6 +46,16 @@
             animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
             z-index: -1;
         }
+        
+        /* Pulse for tutorial target */
+        @keyframes pulse-target {
+            0% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }
+            100% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
+        }
+        .animate-pulse-target {
+            animation: pulse-target 2s ease-in-out infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-100 h-screen w-screen overflow-hidden">
@@ -54,7 +64,7 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle, Hand, Lock, ArrowDown } from 'lucide-react';
+        import { Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle, Hand, Lock, GraduationCap, PlayCircle } from 'lucide-react';
 
         /**
          * UTILITIES & CONSTANTS
@@ -68,6 +78,15 @@
             return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
         };
 
+        const getScoreForDistance = (distance) => {
+            if (distance < 5) return 10;
+            if (distance < 15) return 5;
+            if (distance < 25) return 0;
+            if (distance < 35) return -5;
+            if (distance < 45) return -10;
+            return -20; // Way off
+        };
+
         const ROLES = [
             { id: 1, role: "PG", name: "Point Guard (Chaser)" },
             { id: 2, role: "SG", name: "Shooting Guard (Wing)" },
@@ -76,9 +95,36 @@
             { id: 5, role: "C",  name: "Center (Rim/Anchor)" }
         ];
 
-        // Scenarios ordered by difficulty/flow. 
-        // Index 0-2 have progressive locks. Index 3-4 have no locks.
-        // Index 4 is High Post (The hardest/final boss).
+        // TUTORIAL SCENARIOS
+        const TUTORIAL_SCENARIOS = [
+            {
+                id: 'tut-1',
+                name: "Basic Controls",
+                ballPos: { x: 50, y: 65 }, // Top Key
+                lockedIds: [2, 3, 4, 5],
+                tips: { "2-3": "Great! Tapping a player then the court is faster than dragging." },
+                zones: {
+                    "2-3": [
+                        { id: 1, x: 50, y: 50 } // Only target for Player 1
+                    ]
+                }
+            },
+            {
+                id: 'tut-2',
+                name: "The 2-3 Setup",
+                ballPos: { x: 50, y: 65 }, // Top Key
+                lockedIds: [], // All unlocked
+                tips: { "2-3": "Perfect shape! Now you're ready for the real drills without the guides." },
+                zones: {
+                    "2-3": [
+                        // Standard 2-3 formation
+                        { id: 1, x: 40, y: 55 }, { id: 2, x: 60, y: 55 }, 
+                        { id: 3, x: 20, y: 25 }, { id: 4, x: 80, y: 25 }, { id: 5, x: 50, y: 25 }
+                    ]
+                }
+            }
+        ];
+
         const SCENARIOS = [
             {
                 id: 1,
@@ -207,44 +253,74 @@
         ];
 
         function DefenseIQApp() {
+            // GAME STATE
+            const [isTutorial, setIsTutorial] = useState(true);
+            const [tutorialIndex, setTutorialIndex] = useState(0);
             const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
             const [currentZone, setCurrentZone] = useState("2-3");
             const [score, setScore] = useState(0);
-            const [gameState, setGameState] = useState('playing'); 
+            const [gameState, setGameState] = useState('playing'); // 'playing', 'review', 'complete'
+            
+            // FEEDBACK
             const [lastRoundScore, setLastRoundScore] = useState(0);
             const [feedbackText, setFeedbackText] = useState("");
             const [showLegend, setShowLegend] = useState(false);
+            
+            // INTERACTION
             const [selectedPlayerId, setSelectedPlayerId] = useState(null);
             
-            // Initial Positions - will be overwritten on mount
+            // PLAYERS
             const [players, setPlayers] = useState([]);
 
             const courtRef = useRef(null);
 
-            // Initialize game state with first scenario logic
+            // Init
             useEffect(() => {
                 const saved = localStorage.getItem('defenseIQScore');
                 if (saved) setScore(parseInt(saved));
                 
-                // Initialize first round positions
-                resetPositions(0, "2-3");
+                // Start with Tutorial 1
+                resetPositionsForTutorial(0);
             }, []);
 
+            // --- INIT HELPERS ---
+
+            const resetPositionsForTutorial = (index) => {
+                setIsTutorial(true);
+                setTutorialIndex(index);
+                setGameState('playing');
+                setCurrentZone("2-3");
+                
+                const tut = TUTORIAL_SCENARIOS[index];
+                const lockedIds = tut.lockedIds || [];
+
+                // Reset players to baseline
+                setPlayers([1, 2, 3, 4, 5].map(id => {
+                    if (lockedIds.includes(id)) {
+                        // Dummy positions for locked players in tutorial 1 so they are out of the way or fixed
+                        // For simplicity, we just put them on the bench or specific spots
+                        return { id, x: 20 + (id * 10), y: 20, locked: true };
+                    }
+                    return { id, x: 40 + (id * 5), y: 8, locked: false };
+                }));
+                
+                setSelectedPlayerId(null);
+            };
+
             const resetPositions = (scenarioIdx, zoneName) => {
+                setIsTutorial(false);
+                
                 // STRICT Progressive Difficulty Logic
                 let lockedIds = [];
                 
                 if (scenarioIdx === 0) {
-                    // Level 1: Unlock Player 1. Lock 2,3,4,5.
                     lockedIds = [2, 3, 4, 5];
                 } else if (scenarioIdx === 1) {
-                    // Level 2: Unlock Players 1, 2. Lock 3,4,5.
                     lockedIds = [3, 4, 5];
                 } else if (scenarioIdx === 2) {
-                    // Level 3: Unlock Players 1, 2, 3. Lock 4,5.
                     lockedIds = [4, 5];
                 }
-                // Level 4 (Index 3) & 5 (Index 4): Unlock All. No locks.
+                // Level 4 & 5: No locks.
 
                 const scenario = SCENARIOS[scenarioIdx];
                 const correctPositions = scenario.zones[zoneName];
@@ -256,11 +332,10 @@
                         return { ...correctPos, locked: true };
                     } else {
                         // Default Start Position: UNDER THE BASKET (Baseline)
-                        // Spread X slightly so they aren't stacked
                         return { 
                             id, 
-                            x: 40 + (id * 5), // Centers them nicely at 45, 50, 55 etc.
-                            y: 8,             // Very top of screen (Basket is ~7)
+                            x: 40 + (id * 5), 
+                            y: 8,             
                             locked: false 
                         };
                     }
@@ -270,7 +345,29 @@
                 setSelectedPlayerId(null);
             };
 
+            // --- FLOW CONTROL ---
+
+            const startRegularSeason = () => {
+                setCurrentScenarioIndex(0);
+                setCurrentZone("2-3");
+                setScore(0);
+                setGameState('playing');
+                resetPositions(0, "2-3");
+                localStorage.setItem('defenseIQScore', 0);
+            };
+
             const nextScenario = () => {
+                if (isTutorial) {
+                    if (tutorialIndex < TUTORIAL_SCENARIOS.length - 1) {
+                        // Go to next tutorial step
+                        resetPositionsForTutorial(tutorialIndex + 1);
+                    } else {
+                        // Tutorial Complete -> Go to Game
+                        startRegularSeason();
+                    }
+                    return;
+                }
+
                 if (currentScenarioIndex < SCENARIOS.length - 1) {
                     const nextIndex = currentScenarioIndex + 1;
                     const zones = ["2-3", "3-2", "1-3-1"];
@@ -287,20 +384,14 @@
             };
 
             const restartGame = () => {
-                const firstZone = "2-3";
-                setCurrentScenarioIndex(0);
-                setCurrentZone(firstZone);
-                setScore(0);
-                setGameState('playing');
-                resetPositions(0, firstZone);
-                localStorage.setItem('defenseIQScore', 0);
+                // Skip tutorial on restart
+                startRegularSeason();
             };
 
-            // SELECT PLAYER
+            // --- INTERACTION ---
+
             const handlePlayerClick = (e, player) => {
                 if (gameState !== 'playing') return;
-                
-                // If player is locked, they cannot be selected
                 if (player.locked) return;
 
                 e.stopPropagation(); 
@@ -312,7 +403,6 @@
                 }
             };
 
-            // PLACE PLAYER
             const handleCourtClick = (e) => {
                 if (gameState !== 'playing') return;
                 if (selectedPlayerId === null) return;
@@ -322,10 +412,8 @@
                     const xPct = ((e.clientX - rect.left) / rect.width) * 100;
                     const yPct = ((e.clientY - rect.top) / rect.height) * 100;
 
-                    // Convert CSS Percent to Court Coordinates (0-75)
                     const yCourt = (yPct / 100) * VIEW_HEIGHT;
 
-                    // Clamp to court boundaries
                     const clampedX = Math.max(2, Math.min(98, xPct));
                     const clampedY = Math.max(2, Math.min(VIEW_HEIGHT - 2, yCourt));
 
@@ -333,49 +421,52 @@
                         p.id === selectedPlayerId ? { ...p, x: clampedX, y: clampedY } : p
                     ));
                     
-                    // Auto deselect after placement for "Tap-Place" flow
                     setSelectedPlayerId(null);
                 }
             };
 
             const submitRound = () => {
                 setSelectedPlayerId(null);
-                const scenario = SCENARIOS[currentScenarioIndex];
+                
+                const scenario = isTutorial ? TUTORIAL_SCENARIOS[tutorialIndex] : SCENARIOS[currentScenarioIndex];
                 const correctPositions = scenario.zones[currentZone];
                 
                 let roundScore = 0;
                 
                 players.forEach(p => {
-                    const correct = correctPositions.find(cp => cp.id === p.id);
-                    const distance = getDistance(p.x, p.y, correct.x, correct.y);
-                    
-                    let pScore = 0;
-                    if (distance < 5) pScore = 200;
-                    else if (distance < 15) pScore = 200 - ((distance - 5) * 10);
-                    else pScore = Math.max(0, 100 - ((distance - 15) * 5));
-                    
-                    roundScore += Math.floor(pScore);
+                    // Only score unlocked players
+                    if (!p.locked) {
+                        const correct = correctPositions.find(cp => cp.id === p.id);
+                        if (correct) { // Ensure target exists
+                            const distance = getDistance(p.x, p.y, correct.x, correct.y);
+                            roundScore += getScoreForDistance(distance);
+                        }
+                    }
                 });
 
                 setLastRoundScore(roundScore);
                 setScore(prev => {
+                    // Don't save tutorial score to permanent record
+                    if(isTutorial) return 0;
+
                     const newScore = prev + roundScore;
                     localStorage.setItem('defenseIQScore', newScore);
                     return newScore;
                 });
+                
                 setFeedbackText(scenario.tips[currentZone]);
                 setGameState('review');
             };
 
             const copyResults = () => {
-                const text = `🏀 Defense IQ Results 🏀\nPoints: ${score}\nCompleted: ${SCENARIOS.length} Scenarios\n\nThink you can beat me?`;
+                const text = `🏀 Defense IQ Rating: ${score > 0 ? '+' : ''}${score}\n${score > 30 ? 'Elite Defender' : 'Benchwarmer'} Status\n\nCan you beat my rating?`;
                 navigator.clipboard.writeText(text);
-                alert("Score copied to clipboard! Share it with the team.");
+                alert("Rating copied! Share it with the team.");
             };
 
-            const currentScenario = SCENARIOS[currentScenarioIndex];
+            // --- RENDER HELPERS ---
 
-            // Helper to see how many players need moving this round
+            const currentScenario = isTutorial ? TUTORIAL_SCENARIOS[tutorialIndex] : SCENARIOS[currentScenarioIndex];
             const activePlayersCount = players.filter(p => !p.locked).length;
 
             return (
@@ -394,25 +485,38 @@
                                 >
                                     <HelpCircle className="w-3 h-3" /> Roles
                                 </button>
-                                <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1">
-                                    <Trophy className="w-3 h-3" /> {score}
-                                </div>
+                                {!isTutorial && (
+                                    <div className={`px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1 ${score >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                        <Trophy className="w-3 h-3" /> {score > 0 ? '+' : ''}{score}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         
-                        <div className="flex gap-1 mb-1">
-                            {SCENARIOS.map((_, idx) => (
-                                <div 
-                                    key={idx} 
-                                    className={`h-1 flex-1 rounded-full ${idx <= currentScenarioIndex ? 'bg-orange-500' : 'bg-gray-200'}`}
-                                />
-                            ))}
-                        </div>
-                        <p className="text-xs text-gray-500 text-center flex justify-center gap-2">
-                            <span>Scenario {currentScenarioIndex + 1} of 5</span>
-                            <span className="text-gray-300">•</span>
-                            <span className="text-orange-600 font-bold">{activePlayersCount} Active Player{activePlayersCount !== 1 && 's'}</span>
-                        </p>
+                        {!isTutorial ? (
+                            <React.Fragment>
+                                <div className="flex gap-1 mb-1">
+                                    {SCENARIOS.map((_, idx) => (
+                                        <div 
+                                            key={idx} 
+                                            className={`h-1 flex-1 rounded-full ${idx <= currentScenarioIndex ? 'bg-orange-500' : 'bg-gray-200'}`}
+                                        />
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-500 text-center flex justify-center gap-2">
+                                    <span>Scenario {currentScenarioIndex + 1} of 5</span>
+                                    <span className="text-gray-300">•</span>
+                                    <span className="text-orange-600 font-bold">{activePlayersCount} Active Player{activePlayersCount !== 1 && 's'}</span>
+                                </p>
+                            </React.Fragment>
+                        ) : (
+                            <div className="flex flex-col items-center">
+                                <div className="bg-blue-600 text-white text-xs font-bold py-1 px-3 rounded-full mb-1">
+                                    ROOKIE CAMP {tutorialIndex + 1}/2
+                                </div>
+                                <p className="text-xs text-gray-500 font-semibold">{currentScenario.name}</p>
+                            </div>
+                        )}
 
                         {showLegend && (
                             <div className="mt-2 bg-gray-50 p-2 rounded text-xs border border-gray-200 grid grid-cols-2 gap-1">
@@ -434,11 +538,11 @@
                             <React.Fragment>
                                 <div className="bg-white p-4 rounded-lg shadow-sm w-full mb-4 text-center border border-gray-200">
                                     <span className="block text-xs uppercase tracking-wider text-gray-400 font-bold mb-1">Mission</span>
-                                    <h2 className="text-2xl font-black text-gray-800 mb-1">{currentZone} ZONE</h2>
+                                    <h2 className="text-2xl font-black text-gray-800 mb-1">{isTutorial ? "LEARNING THE ROPES" : `${currentZone} ZONE`}</h2>
                                     <p className="text-sm text-gray-600">Defend: <span className="font-semibold text-orange-600">{currentScenario.name}</span></p>
                                 </div>
 
-                                {/* WHITEBOARD / COURT (Tap Target) */}
+                                {/* WHITEBOARD / COURT */}
                                 <div 
                                     ref={courtRef}
                                     onClick={handleCourtClick}
@@ -455,7 +559,7 @@
                                         </div>
                                     )}
 
-                                    {/* SVG ViewBox 0 0 100 75 cuts off bottom 25% of court */}
+                                    {/* SVG COURT LINES */}
                                     <svg viewBox={`0 0 100 ${VIEW_HEIGHT}`} className="absolute inset-0 w-full h-full pointer-events-none opacity-40 z-10">
                                         <line x1="0" y1="98" x2="100" y2="98" stroke="black" strokeWidth="1" />
                                         <rect x="35" y="0" width="30" height="38" fill="none" stroke="black" strokeWidth="1" />
@@ -473,18 +577,22 @@
                                     >
                                     </div>
 
-                                    {/* CORRECT POSITIONS (GHOSTS) */}
-                                    {gameState === 'review' && currentScenario.zones[currentZone].map((pos) => (
-                                        <div
-                                            key={`ghost-${pos.id}`}
-                                            className="absolute w-10 h-10 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 opacity-60 z-0"
-                                            style={{ left: `${pos.x}%`, top: toPct(pos.y) }}
-                                        >
-                                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                        </div>
-                                    ))}
+                                    {/* GHOST TARGETS (REVIEW or TUTORIAL PLAY) */}
+                                    {(gameState === 'review' || (isTutorial && gameState === 'playing')) && 
+                                        currentScenario.zones[currentZone].map((pos) => (
+                                            <div
+                                                key={`ghost-${pos.id}`}
+                                                className={`absolute w-12 h-12 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 opacity-60 z-0 ${isTutorial && gameState === 'playing' ? 'animate-pulse-target' : ''}`}
+                                                style={{ left: `${pos.x}%`, top: toPct(pos.y) }}
+                                            >
+                                                {/* In Tutorial, show a little green dot to guide them exactly */}
+                                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                {isTutorial && <span className="absolute -bottom-5 text-[10px] font-bold text-green-700 bg-white/80 px-1 rounded">{pos.id}</span>}
+                                            </div>
+                                        ))
+                                    }
 
-                                    {/* PLAYERS (TAP TO SELECT) */}
+                                    {/* PLAYERS */}
                                     {players.map((player) => {
                                         const correct = gameState === 'review' ? currentScenario.zones[currentZone].find(p => p.id === player.id) : null;
                                         const isSelected = selectedPlayerId === player.id;
@@ -492,24 +600,34 @@
 
                                         return (
                                             <React.Fragment key={player.id}>
-                                                {/* Line */}
-                                                {gameState === 'review' && correct && (
-                                                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-                                                        <line 
-                                                            x1={`${player.x}`} y1={`${player.y}`} 
-                                                            x2={`${correct.x}`} y2={`${correct.y}`} 
-                                                            stroke={getDistance(player.x, player.y, correct.x, correct.y) < 15 ? "green" : "red"} 
-                                                            strokeWidth="0.5" 
-                                                            strokeDasharray="4 2"
-                                                        />
-                                                    </svg>
+                                                {/* Line & Score Indicator */}
+                                                {gameState === 'review' && correct && !isLocked && (
+                                                    <React.Fragment>
+                                                        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                                                            <line 
+                                                                x1={`${player.x}`} y1={`${player.y}`} 
+                                                                x2={`${correct.x}`} y2={`${correct.y}`} 
+                                                                stroke={getDistance(player.x, player.y, correct.x, correct.y) < 25 ? "green" : "red"} 
+                                                                strokeWidth="0.5" 
+                                                                strokeDasharray="4 2"
+                                                            />
+                                                        </svg>
+                                                        {/* Individual Score Pop-up */}
+                                                        <div 
+                                                            className={`absolute transform -translate-x-1/2 -translate-y-full mt-[-10px] text-xs font-bold ${getScoreForDistance(getDistance(player.x, player.y, correct.x, correct.y)) >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                                                            style={{ left: `${player.x}%`, top: toPct(player.y) }}
+                                                        >
+                                                            {getScoreForDistance(getDistance(player.x, player.y, correct.x, correct.y)) > 0 ? '+' : ''}
+                                                            {getScoreForDistance(getDistance(player.x, player.y, correct.x, correct.y))}
+                                                        </div>
+                                                    </React.Fragment>
                                                 )}
 
                                                 <div
                                                     onClick={(e) => handlePlayerClick(e, player)}
                                                     className={`absolute w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-lg transform -translate-x-1/2 -translate-y-1/2 transition-all z-20
                                                         ${isLocked 
-                                                            ? 'bg-blue-900 text-blue-200 cursor-default opacity-90 border-2 border-blue-800' 
+                                                            ? 'bg-blue-900 text-blue-200 cursor-default opacity-50 border-2 border-blue-800' 
                                                             : gameState === 'review' 
                                                                 ? 'bg-gray-200 text-gray-500 border-2 border-gray-400 scale-75 cursor-default'
                                                                 : isSelected 
@@ -536,16 +654,21 @@
                                                  <>
                                                     <Hand className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                                                     <p className="text-sm text-blue-800">
-                                                        Moving Player <strong>{selectedPlayerId}</strong>. Tap anywhere on the court to place them.
+                                                        {isTutorial 
+                                                            ? "Match the player number to the flashing target." 
+                                                            : `Moving Player ${selectedPlayerId}. Tap anywhere on the court to place.`}
                                                     </p>
                                                  </>
                                             ) : (
                                                 <>
                                                     <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                                                     <p className="text-sm text-blue-800">
-                                                        {activePlayersCount === 5 
-                                                            ? "Tap a player to select, then tap the court to move." 
-                                                            : `Move the ${activePlayersCount} active player${activePlayersCount > 1 ? 's' : ''} from the baseline.`}
+                                                        {isTutorial 
+                                                            ? (tutorialIndex === 0 ? "Tap Player 1 to select him." : "Move all players to their flashing spots.")
+                                                            : activePlayersCount === 5 
+                                                                ? "Tap a player to select, then tap the court to move." 
+                                                                : `Move the ${activePlayersCount} active player${activePlayersCount > 1 ? 's' : ''} from the baseline.`
+                                                        }
                                                     </p>
                                                 </>
                                             )}
@@ -553,7 +676,9 @@
                                     ) : (
                                         <div className="bg-green-50 border border-green-200 p-4 rounded-lg animate-in slide-in-from-bottom-2 duration-300">
                                             <div className="flex justify-between items-center mb-2">
-                                                <span className="font-bold text-green-800 text-lg">Round Score: +{lastRoundScore}</span>
+                                                <span className={`font-bold text-lg ${lastRoundScore >= 0 ? 'text-green-800' : 'text-red-800'}`}>
+                                                    Rating: {lastRoundScore > 0 ? '+' : ''}{lastRoundScore}
+                                                </span>
                                                 <span className="text-xs text-green-600 uppercase font-bold tracking-wide">Coach says:</span>
                                             </div>
                                             <p className="text-sm text-gray-700 italic border-l-4 border-green-500 pl-3 mb-2">
@@ -576,7 +701,7 @@
                                             onClick={nextScenario}
                                             className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-orange-700 active:scale-95 transition-all flex items-center justify-center gap-2"
                                         >
-                                            Next Drill <ChevronRight />
+                                            {(isTutorial && tutorialIndex === TUTORIAL_SCENARIOS.length - 1) ? "Start Regular Season" : "Next Drill"} <ChevronRight />
                                         </button>
                                     )}
                                 </div>
@@ -584,19 +709,23 @@
                         ) : (
                             /* COMPLETION SCREEN */
                             <div className="flex flex-col items-center justify-center h-full w-full py-10 animate-in zoom-in duration-300">
-                                <Trophy className="w-24 h-24 text-yellow-500 mb-6 drop-shadow-md" />
-                                <h2 className="text-3xl font-black text-gray-900 mb-2">Drills Complete!</h2>
+                                <Trophy className={`w-24 h-24 mb-6 drop-shadow-md ${score > 0 ? 'text-yellow-500' : 'text-gray-400'}`} />
+                                <h2 className="text-3xl font-black text-gray-900 mb-2">Season Complete!</h2>
                                 <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 text-center w-full mb-6">
-                                    <span className="block text-gray-500 text-sm uppercase font-bold tracking-wider mb-2">Final IQ Score</span>
-                                    <span className="block text-6xl font-black text-orange-600 mb-2">{score}</span>
-                                    <span className="block text-sm text-gray-400">out of 5000</span>
+                                    <span className="block text-gray-500 text-sm uppercase font-bold tracking-wider mb-2">Net Defensive Rating</span>
+                                    <span className={`block text-6xl font-black mb-2 ${score >= 0 ? 'text-orange-600' : 'text-red-600'}`}>
+                                        {score > 0 ? '+' : ''}{score}
+                                    </span>
+                                    <span className="block text-sm text-gray-400">
+                                        {score > 30 ? "Defensive Player of the Year!" : score > 0 ? "Solid Rotational Player" : "Needs work in the G-League"}
+                                    </span>
                                 </div>
                                 
                                 <button 
                                     onClick={copyResults}
                                     className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2 mb-3"
                                 >
-                                    <Share2 className="w-5 h-5" /> Copy Score to Team Chat
+                                    <Share2 className="w-5 h-5" /> Copy Rating to Team Chat
                                 </button>
                                 
                                 <button 
@@ -610,7 +739,7 @@
                     </div>
                     
                     <div className="w-full text-center py-4 text-xs text-gray-400 bg-white border-t border-gray-100">
-                        Defense IQ Trainer v1.1 • Feature: Gameplay
+                        Defense IQ Trainer v1.3 • Feature: Extended Rookie Camp
                     </div>
                 </div>
             );
