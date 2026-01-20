@@ -64,7 +64,7 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle, Hand, Lock, GraduationCap, PlayCircle } from 'lucide-react';
+        import { Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle, Hand, Lock, GraduationCap, PlayCircle, MousePointerClick } from 'lucide-react';
 
         /**
          * UTILITIES & CONSTANTS
@@ -649,30 +649,41 @@
                                 {/* INSTRUCTIONS / FEEDBACK AREA */}
                                 <div className="w-full mt-4">
                                     {gameState === 'playing' ? (
-                                        <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg flex items-start gap-3">
-                                            {selectedPlayerId ? (
-                                                 <>
-                                                    <Hand className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                                                    <p className="text-sm text-blue-800">
-                                                        {isTutorial 
-                                                            ? "Match the player number to the flashing target." 
-                                                            : `Moving Player ${selectedPlayerId}. Tap anywhere on the court to place.`}
-                                                    </p>
-                                                 </>
-                                            ) : (
-                                                <>
-                                                    <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                                                    <p className="text-sm text-blue-800">
-                                                        {isTutorial 
-                                                            ? (tutorialIndex === 0 ? "Tap Player 1 to select him." : "Move all players to their flashing spots.")
-                                                            : activePlayersCount === 5 
-                                                                ? "Tap a player to select, then tap the court to move." 
-                                                                : `Move the ${activePlayersCount} active player${activePlayersCount > 1 ? 's' : ''} from the baseline.`
-                                                        }
-                                                    </p>
-                                                </>
-                                            )}
-                                        </div>
+                                        // Dynamic Instruction Box
+                                        isTutorial && tutorialIndex === 0 && !selectedPlayerId ? (
+                                            <div className="bg-blue-600 text-white p-4 rounded-lg flex items-center gap-3 shadow-lg animate-pulse ring-4 ring-blue-300">
+                                                <MousePointerClick className="w-8 h-8 flex-shrink-0" />
+                                                <div>
+                                                    <p className="font-bold text-lg uppercase tracking-wider mb-1">How to Play</p>
+                                                    <p className="text-sm leading-tight">1. <strong>TAP</strong> a player to select.<br/>2. <strong>TAP</strong> the court to place.</p>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg flex items-start gap-3">
+                                                {selectedPlayerId ? (
+                                                     <>
+                                                        <Hand className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                                        <p className="text-sm text-blue-800">
+                                                            {isTutorial 
+                                                                ? "Match the player number to the flashing target." 
+                                                                : `Moving Player ${selectedPlayerId}. Tap anywhere on the court to place.`}
+                                                        </p>
+                                                     </>
+                                                ) : (
+                                                    <>
+                                                        <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                                        <p className="text-sm text-blue-800">
+                                                            {isTutorial 
+                                                                ? (tutorialIndex === 0 ? "Tap Player 1 to select him." : "Move all players to their flashing spots.")
+                                                                : activePlayersCount === 5 
+                                                                    ? "Tap a player to select, then tap the court to move." 
+                                                                    : `Move the ${activePlayersCount} active player${activePlayersCount > 1 ? 's' : ''} from the baseline.`
+                                                            }
+                                                        </p>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )
                                     ) : (
                                         <div className="bg-green-50 border border-green-200 p-4 rounded-lg animate-in slide-in-from-bottom-2 duration-300">
                                             <div className="flex justify-between items-center mb-2">
@@ -739,7 +750,7 @@
                     </div>
                     
                     <div className="w-full text-center py-4 text-xs text-gray-400 bg-white border-t border-gray-100">
-                        Defense IQ Trainer v1.4 • Feature: Updated Scoring
+                        Defense IQ Trainer v1.5 • Feature: Enhanced Instructions
                     </div>
                 </div>
             );
