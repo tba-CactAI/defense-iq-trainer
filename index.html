@@ -77,12 +77,34 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, collection, addDoc, getDocs, onSnapshot, query } from 'firebase/firestore';
 
-        // --- FIREBASE SETUP ---
-        const firebaseConfig = JSON.parse(__firebase_config || '{}');
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'defense-iq';
+        // --- FIREBASE SETUP (ROBUST) ---
+        let app, auth, db, appId;
+        
+        // 1. Safe Config Extraction
+        let firebaseConfig = {};
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                firebaseConfig = JSON.parse(__firebase_config);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'defense-iq';
+            } else {
+                console.warn("No Firebase config found. App will run in offline mode.");
+            }
+        } catch (e) {
+            console.warn("Error parsing config", e);
+        }
+
+        // 2. Initialize only if valid config exists
+        const isFirebaseAvailable = Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey;
+        
+        if (isFirebaseAvailable) {
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } catch(e) {
+                console.error("Firebase init failed:", e);
+            }
+        }
 
         // --- CONSTANTS ---
         const VIEW_HEIGHT = 75; 
@@ -129,9 +151,7 @@
         };
 
         const getCoachFeedback = (totalScore, maxPossible) => {
-            // Avoid division by zero
             if (maxPossible === 0) return COACH_PHRASES.medium[0];
-            
             const percentage = totalScore / maxPossible;
             if (percentage >= 0.8) return COACH_PHRASES.high[Math.floor(Math.random() * COACH_PHRASES.high.length)];
             if (percentage >= 0.4) return COACH_PHRASES.medium[Math.floor(Math.random() * COACH_PHRASES.medium.length)];
@@ -236,11 +256,17 @@
 
             // --- FIREBASE INIT ---
             useEffect(() => {
+                if (!isFirebaseAvailable) return;
+                
                 const initAuth = async () => {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) {
+                        console.error("Auth init failed", e);
                     }
                 };
                 initAuth();
@@ -250,7 +276,9 @@
 
             // --- FETCH LEADERBOARD ---
             useEffect(() => {
-                if (!user) return;
+                if (!user || !db) return;
+                
+                // One-time fetch to sort on client since compound queries require indexes we can't auto-create here
                 const fetchLeaderboard = async () => {
                     try {
                         const q = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
@@ -271,7 +299,8 @@
                     snapshot.forEach((doc) => scores.push(doc.data()));
                     scores.sort((a, b) => b.score - a.score);
                     setLeaderboard(scores.slice(0, 10));
-                });
+                }, (err) => console.error("Snapshot error:", err));
+                
                 return () => unsubscribe();
             }, [user]);
 
@@ -359,7 +388,7 @@
                 setGameState('playing');
                 setupBoard(BASE_SCENARIOS[0], z, 'season');
                 setView('game');
-                setShowStrategyModal(false); // Close modal if open
+                setShowStrategyModal(false);
             };
 
             const startTutorial = () => {
@@ -484,7 +513,7 @@
                 } else {
                     if (mode === 'tutorial') setView('tutorial-summary');
                     else {
-                        if (mode === 'season' && user) {
+                        if (mode === 'season' && user && db) {
                             try {
                                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard'), {
                                     name: playerName,
