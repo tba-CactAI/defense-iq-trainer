@@ -77,10 +77,12 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, collection, addDoc, getDocs, onSnapshot, query } from 'firebase/firestore';
 
-        // --- FIREBASE SETUP (ROBUST) ---
+        // --- FIREBASE SETUP (ROBUST & DEPLOYMENT SAFE) ---
         let app, auth, db, appId;
         let firebaseConfig = {};
+        
         try {
+            // Check if running in an environment with injected config
             if (typeof __firebase_config !== 'undefined') {
                 firebaseConfig = JSON.parse(__firebase_config);
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'defense-iq';
@@ -232,7 +234,7 @@
 
         function DefenseIQApp() {
             // STATE
-            const [showSplash, setShowSplash] = useState(true); // NEW: Splash state
+            const [showSplash, setShowSplash] = useState(true);
             const [view, setView] = useState('welcome'); 
             const [mode, setMode] = useState('tutorial'); 
             const [user, setUser] = useState(null);
@@ -248,7 +250,7 @@
             const [showStrategyModal, setShowStrategyModal] = useState(false);
 
             // GAMEPLAY
-            const [currentDrillIndex, setCurrentDrillIndex] = useState(0); // For tracking playlist progress
+            const [currentDrillIndex, setCurrentDrillIndex] = useState(0); 
             const [currentZone, setCurrentZone] = useState("2-3");
             const [players, setPlayers] = useState([]);
             const [selectedId, setSelectedId] = useState(null);
@@ -265,7 +267,7 @@
             useEffect(() => {
                 const timer = setTimeout(() => {
                     setShowSplash(false);
-                }, 2000); // 2 seconds duration
+                }, 2000); 
                 return () => clearTimeout(timer);
             }, []);
 
@@ -349,17 +351,13 @@
                 return baseTargets;
             };
 
-            // Helper to handle interchangeable players (3 and 4)
             const getBestTargetMapping = (currentPlayers, currentTargets) => {
                 const mapping = {};
-                // Fixed Roles (1, 2, 5)
                 [1, 2, 5].forEach(id => {
                     const p = currentPlayers.find(pl => pl.id === id);
                     const t = currentTargets.find(tg => tg.id === id);
                     if (p && t) mapping[id] = t;
                 });
-
-                // Interchangeable Roles (3, 4)
                 const p3 = currentPlayers.find(p => p.id === 3);
                 const p4 = currentPlayers.find(p => p.id === 4);
                 const t3 = currentTargets.find(t => t.id === 3);
@@ -423,21 +421,17 @@
                 setShowStrategyModal(false);
             };
 
-            // Enhanced setupBoard using drill index for progressive locks
             const setupBoard = (scenario, zoneName, currentMode, drillIndex) => {
                 let lockedIds = [];
                 
                 if (currentMode === 'tutorial') {
                     lockedIds = scenario.lockedIds || [];
                 } else if (currentMode === 'season') {
-                    // Progressive difficulty based on round number (drillIndex 0-4)
-                    if (drillIndex === 0) lockedIds = [2, 3, 4, 5]; // 1 active
-                    else if (drillIndex === 1) lockedIds = [3, 4, 5]; // 2 active
-                    else if (drillIndex === 2) lockedIds = [4, 5];    // 3 active
-                    // Rounds 3 & 4 (Indices 3,4) have 0 locked (All active)
+                    if (drillIndex === 0) lockedIds = [2, 3, 4, 5]; 
+                    else if (drillIndex === 1) lockedIds = [3, 4, 5]; 
+                    else if (drillIndex === 2) lockedIds = [4, 5];    
                 }
                 
-                // Determine Style
                 let style = 'Pressure';
                 if (currentMode === 'practice') style = practiceConfig.style;
                 else if (currentMode === 'season') style = DAILY_PLAYLIST[drillIndex].style;
@@ -666,9 +660,8 @@
                             <img 
                                 src="zownedlogo.png" 
                                 alt="ZOWNED" 
-                                className="w-64 max-w-[80%] object-contain"
+                                className="w-64 max-w-[80%] max-h-[40vh] object-contain"
                                 onError={(e) => {
-                                    // Fallback if image not found during dev/testing
                                     e.target.style.display = 'none';
                                     document.getElementById('splash-text').style.display = 'block';
                                 }}
