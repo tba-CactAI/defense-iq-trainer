@@ -79,7 +79,7 @@
         import { getFirestore, collection, addDoc, getDocs, onSnapshot, query } from 'firebase/firestore';
         import { getAnalytics } from 'firebase/analytics';
 
-        // --- FIREBASE SETUP (HARDCODED FOR DEPLOYMENT) ---
+        // --- FIREBASE SETUP (HARDCODED) ---
         const firebaseConfig = {
             apiKey: "AIzaSyAYdtvjWcfssqNOpno2wULeh5ga_siF-xE",
             authDomain: "zowned-41710.firebaseapp.com",
@@ -101,28 +101,27 @@
             console.error("Firebase Initialization Error:", e);
         }
 
-        // Used for leaderboard collection path
-        const appId = 'defense-iq'; 
+        const isFirebaseAvailable = !!app;
 
         // --- CONSTANTS ---
         const VIEW_HEIGHT = 75; 
         const toPct = (courtY) => (courtY / VIEW_HEIGHT) * 100 + '%';
         const getDistance = (x1, y1, x2, y2) => Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
 
-        // Scoring: <5=Perfect(+10), <15=Good(+5), <25=Okay(+2), <40=Poor(-5), <60=Bad(-10), >60=WayOff(-20)
+        // Scoring: <10=Perfect(10), <20=Good(5), <30=Okay(2), <40=Poor(-5), <60=Bad(-10), >60=WayOff(-20)
         const getScoreForDistance = (distance) => {
-            if (distance < 5) return 10;
-            if (distance < 15) return 5;
-            if (distance < 25) return 2;
+            if (distance < 10) return 10;
+            if (distance < 20) return 5;
+            if (distance < 30) return 2;
             if (distance < 40) return -5;
             if (distance < 60) return -10;
             return -20;
         };
 
         const getStatusColor = (score) => {
-            if (score >= 10) return "green";
-            if (score > 0) return "yellow";
-            return "red";
+            if (score >= 5) return "green";   // 10, 5
+            if (score >= -5) return "yellow"; // 2, -5
+            return "red";                     // -10, -20
         };
 
         // --- COACHING COMMENTARY ---
@@ -222,13 +221,13 @@
             { id: 6, name: "High Post", ballPos: { x: 50, y: 45 }, zones: { "2-3": [{ id: 5, x: 50, y: 35 }, { id: 3, x: 30, y: 25 }, { id: 4, x: 70, y: 25 }, { id: 1, x: 40, y: 50 }, { id: 2, x: 60, y: 50 }], "3-2": [{ id: 4, x: 45, y: 35 }, { id: 5, x: 55, y: 35 }, { id: 1, x: 50, y: 60 }, { id: 2, x: 30, y: 45 }, { id: 3, x: 70, y: 45 }], "1-3-1": [{ id: 5, x: 50, y: 38 }, { id: 1, x: 50, y: 60 }, { id: 2, x: 35, y: 45 }, { id: 3, x: 65, y: 45 }, { id: 4, x: 50, y: 20 }] } }
         ];
 
-        // --- DAILY CHALLENGE CONFIGURATION (5 Questions) ---
+        // --- DAILY CHALLENGE CONFIGURATION (5 Questions, All Pressure) ---
         const DAILY_PLAYLIST = [
-            { scenarioIndex: 0, zone: "2-3", style: "Pressure" }, // Top
-            { scenarioIndex: 1, zone: "2-3", style: "Pressure" }, // R Wing
-            { scenarioIndex: 3, zone: "2-3", style: "Pressure" }, // L Wing
-            { scenarioIndex: 5, zone: "2-3", style: "Pressure" }, // High Post
-            { scenarioIndex: 2, zone: "2-3", style: "Trap" }      // R Corner (Trap Finale)
+            { scenarioIndex: 0, zone: "2-3", style: "Pressure" },   // 1. Top (2-3)
+            { scenarioIndex: 1, zone: "2-3", style: "Pressure" },   // 2. R Wing (2-3)
+            { scenarioIndex: 3, zone: "1-3-1", style: "Pressure" }, // 3. L Wing (1-3-1)
+            { scenarioIndex: 5, zone: "1-3-1", style: "Pressure" }, // 4. High Post (1-3-1)
+            { scenarioIndex: 2, zone: "1-3-1", style: "Pressure" }  // 5. R Corner (1-3-1) - ALL PRESSURE
         ];
 
         function DefenseIQApp() {
@@ -263,7 +262,7 @@
 
             // --- FIREBASE INIT ---
             useEffect(() => {
-                if (!auth) return;
+                if (!isFirebaseAvailable) return;
                 
                 const initAuth = async () => {
                     try {
@@ -489,13 +488,6 @@
                     setScore(prev => prev + rScore);
                 }
                 
-                // Play audio based on round score
-                if (rScore > 0) {
-                    playSound('positive points.wav');
-                } else {
-                    playSound('negative points.wav');
-                }
-                
                 if (mode === 'tutorial') {
                     setFeedback(activeScen.tips["2-3"]);
                 } else if (mode === 'practice') {
@@ -538,19 +530,14 @@
                 } else {
                     if (mode === 'tutorial') setView('tutorial-summary');
                     else {
-                        if (mode === 'season') {
-                            if (score > 30) playSound('end game high score.wav');
-                            else playSound('end game low score.wav');
-
-                            if (user && db) {
-                                try {
-                                    await addDoc(collection(db, 'leaderboard'), {
-                                        name: playerName,
-                                        score: score + roundScore,
-                                        date: new Date().toISOString()
-                                    });
-                                } catch (e) { console.error("Error saving score", e); }
-                            }
+                        if (mode === 'season' && user && db) {
+                            try {
+                                await addDoc(collection(db, 'leaderboard'), {
+                                    name: playerName,
+                                    score: score + roundScore,
+                                    date: new Date().toISOString()
+                                });
+                            } catch (e) { console.error("Error saving score", e); }
                         }
                         setView('complete');
                     }
@@ -650,17 +637,6 @@
             const targetMapping = gameState === 'review' ? getBestTargetMapping(players, rawTargets) : {};
             const displayTargets = rawTargets;
 
-            // --- AUDIO HELPER ---
-            const playSound = (filename) => {
-                try {
-                    const audio = new Audio(filename);
-                    audio.volume = 0.5;
-                    audio.play().catch(e => console.log("Audio play prevented:", e));
-                } catch (e) {
-                    console.warn("Audio error:", e);
-                }
-            };
-
             return (
                 <div className="flex flex-col items-center min-h-screen font-sans selection:bg-orange-200 relative">
                     
@@ -702,9 +678,9 @@
                                 </div>
 
                                 <div className="w-full space-y-4 mb-8">
-                                    <button onClick={startTutorial} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><GraduationCap className="w-4 h-4"/> Rookie Camp</button>
-                                    <button onClick={goToNameEntry} className="w-full bg-orange-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Trophy className="w-4 h-4"/> Daily Challenge</button>
-                                    <button onClick={() => setView('practice-info')} className="w-full bg-white text-gray-700 border-2 border-gray-200 py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Layout className="w-4 h-4"/> Practice Lab</button>
+                                    <button onClick={startTutorial} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><GraduationCap className="w-5 h-5"/> Rookie Camp</button>
+                                    <button onClick={goToNameEntry} className="w-full bg-orange-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Trophy className="w-5 h-5"/> Daily Challenge</button>
+                                    <button onClick={() => setView('practice-info')} className="w-full bg-white text-gray-700 border-2 border-gray-200 py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Layout className="w-5 h-5"/> Practice Lab</button>
                                 </div>
 
                                 <div className="w-full bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex-grow flex flex-col min-h-[200px]">
@@ -842,12 +818,15 @@
                                     {/* BALL */}
                                     <div className="absolute w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs shadow-sm transform -translate-x-1/2 -translate-y-1/2 z-10" style={{ left: `${activeScenario.ballPos.x}%`, top: toPct(activeScenario.ballPos.y) }}></div>
 
-                                    {/* GHOSTS */}
-                                    {(gameState === 'review' || (mode === 'tutorial' && gameState === 'playing')) && displayTargets.map(t => (
-                                        <div key={`ghost-${t.id}`} className={`absolute w-12 h-12 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 opacity-60 z-0 ${mode === 'tutorial' && gameState === 'playing' ? 'animate-pulse-target' : ''}`} style={{ left: `${t.x}%`, top: toPct(t.y) }}>
-                                            <span className="text-green-700 font-bold text-lg opacity-70">{t.id}</span>
-                                        </div>
-                                    ))}
+                                    {/* GHOSTS - Z-30 Top Layer, Dynamic Color */}
+                                    {(gameState === 'review' || (mode === 'tutorial' && gameState === 'playing')) && displayTargets.map(t => {
+                                        const isOverlapped = players.some(p => getDistance(p.x, p.y, t.x, t.y) < 6);
+                                        return (
+                                            <div key={`ghost-${t.id}`} className={`absolute w-12 h-12 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none ${mode === 'tutorial' && gameState === 'playing' ? 'animate-pulse-target' : ''}`} style={{ left: `${t.x}%`, top: toPct(t.y) }}>
+                                                <span className={`font-bold text-lg ${isOverlapped ? 'text-white drop-shadow-md' : 'text-green-700'}`}>{t.id}</span>
+                                            </div>
+                                        );
+                                    })}
 
                                     {/* PLAYERS */}
                                     {players.map(p => {
