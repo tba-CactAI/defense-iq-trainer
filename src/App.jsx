@@ -1,0 +1,715 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+    Share2, RefreshCw, Trophy, Info, ChevronRight, Clipboard, HelpCircle, 
+    Hand, Lock, MousePointerClick, Shield, Zap, Target, Layout, GraduationCap, 
+    Settings, BookOpen, Lightbulb, User, X 
+} from 'lucide-react';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { collection, addDoc, getDocs, onSnapshot } from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { ZONE_INFO, COACH_PHRASES, TUTORIAL_SCENARIOS, BASE_SCENARIOS, DAILY_PLAYLIST } from './data';
+
+// --- CONSTANTS ---
+const VIEW_HEIGHT = 75; 
+const toPct = (courtY) => (courtY / VIEW_HEIGHT) * 100 + '%';
+const getDistance = (x1, y1, x2, y2) => Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+
+// Scoring: <10=Perfect(10), <20=Good(5), <30=Okay(2), <40=Poor(-5), <60=Bad(-10), >60=WayOff(-20)
+const getScoreForDistance = (distance) => {
+    if (distance < 10) return 10;
+    if (distance < 20) return 5;
+    if (distance < 30) return 2;
+    if (distance < 40) return -5;
+    if (distance < 60) return -10;
+    return -20;
+};
+
+const getCoachFeedback = (totalScore, maxPossible) => {
+    if (maxPossible === 0) return COACH_PHRASES.medium[0];
+    const percentage = totalScore / maxPossible;
+    if (percentage >= 0.8) return COACH_PHRASES.high[Math.floor(Math.random() * COACH_PHRASES.high.length)];
+    if (percentage >= 0.4) return COACH_PHRASES.medium[Math.floor(Math.random() * COACH_PHRASES.medium.length)];
+    return COACH_PHRASES.low[Math.floor(Math.random() * COACH_PHRASES.low.length)];
+};
+
+function DefenseIQApp() {
+    // STATE
+    const [view, setView] = useState('welcome'); 
+    const [mode, setMode] = useState('tutorial'); 
+    const [user, setUser] = useState(null);
+    
+    // LEADERBOARD & USER INFO
+    const [playerName, setPlayerName] = useState("");
+    const [leaderboard, setLeaderboard] = useState([]);
+
+    // CONFIG
+    const [practiceConfig, setPracticeConfig] = useState({ zone: "2-3", style: "Pressure" });
+    const [summaryZone, setSummaryZone] = useState("2-3"); 
+    const [summaryStyle, setSummaryStyle] = useState("Pressure");
+    const [showStrategyModal, setShowStrategyModal] = useState(false);
+
+    // GAMEPLAY
+    const [currentDrillIndex, setCurrentDrillIndex] = useState(0); 
+    const [currentZone, setCurrentZone] = useState("2-3");
+    const [players, setPlayers] = useState([]);
+    const [selectedId, setSelectedId] = useState(null);
+    const [gameState, setGameState] = useState('playing'); 
+    
+    // SCORING & FEEDBACK
+    const [score, setScore] = useState(0);
+    const [roundScore, setRoundScore] = useState(0);
+    const [feedback, setFeedback] = useState("");
+
+    const courtRef = useRef(null);
+
+    // --- FIREBASE INIT ---
+    useEffect(() => {
+        if (!auth) return;
+        
+        const initAuth = async () => {
+            try {
+                await signInAnonymously(auth);
+            } catch (e) {
+                console.error("Auth init failed", e);
+            }
+        };
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, setUser);
+        return () => unsubscribe();
+    }, []);
+
+    // --- FETCH LEADERBOARD ---
+    useEffect(() => {
+        if (!user || !db) return;
+        
+        const fetchLeaderboard = async () => {
+            try {
+                const q = collection(db, 'leaderboard');
+                const querySnapshot = await getDocs(q);
+                const scores = [];
+                querySnapshot.forEach((doc) => scores.push(doc.data()));
+                scores.sort((a, b) => b.score - a.score);
+                setLeaderboard(scores.slice(0, 10));
+            } catch (e) {
+                console.error("Leaderboard fetch error:", e);
+            }
+        };
+        fetchLeaderboard();
+        
+        const q = collection(db, 'leaderboard');
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const scores = [];
+            snapshot.forEach((doc) => scores.push(doc.data()));
+            scores.sort((a, b) => b.score - a.score);
+            setLeaderboard(scores.slice(0, 10));
+        });
+        return () => unsubscribe();
+    }, [user]);
+
+    // --- LOGIC: CALCULATE POSITIONS ---
+    const getTargets = (scenario, zoneName, style) => {
+        if (!scenario || !scenario.zones) return [];
+        let baseTargets = scenario.zones[zoneName];
+        if (!baseTargets) return [];
+
+        if (style === 'Pressure') return baseTargets;
+
+        if (style === 'Contain') {
+            return baseTargets.map(p => ({
+                ...p,
+                x: p.x + (50 - p.x) * 0.2,
+                y: p.y - (p.y - 7) * 0.15
+            }));
+        }
+
+        if (style === 'Trap') {
+            const ball = scenario.ballPos;
+            const sorted = [...baseTargets].sort((a, b) => {
+                return getDistance(a.x, a.y, ball.x, ball.y) - getDistance(b.x, b.y, ball.x, ball.y);
+            });
+            const t1 = sorted[0];
+            const t2 = sorted[1];
+            return baseTargets.map(p => {
+                if (p.id === t1.id) return { ...p, x: ball.x + (ball.x > 50 ? -3 : 3), y: ball.y + (ball.y > 45 ? -2 : 2) };
+                if (p.id === t2.id) return { ...p, x: ball.x + (ball.x > 50 ? 3 : -3), y: ball.y + (ball.y > 45 ? 2 : -2) };
+                return { ...p, x: p.x + (ball.x - p.x) * 0.15, y: p.y + (ball.y - p.y) * 0.1 };
+            });
+        }
+        return baseTargets;
+    };
+
+    const getBestTargetMapping = (currentPlayers, currentTargets) => {
+        const mapping = {};
+        [1, 2, 5].forEach(id => {
+            const p = currentPlayers.find(pl => pl.id === id);
+            const t = currentTargets.find(tg => tg.id === id);
+            if (p && t) mapping[id] = t;
+        });
+        const p3 = currentPlayers.find(p => p.id === 3);
+        const p4 = currentPlayers.find(p => p.id === 4);
+        const t3 = currentTargets.find(t => t.id === 3);
+        const t4 = currentTargets.find(t => t.id === 4);
+
+        if (p3 && p4 && t3 && t4) {
+            const distStandard = getDistance(p3.x, p3.y, t3.x, t3.y) + getDistance(p4.x, p4.y, t4.x, t4.y);
+            const distSwapped = getDistance(p3.x, p3.y, t4.x, t4.y) + getDistance(p4.x, p4.y, t3.x, t3.y);
+            if (distSwapped < distStandard) {
+                mapping[3] = t4;
+                mapping[4] = t3;
+            } else {
+                mapping[3] = t3;
+                mapping[4] = t4;
+            }
+        } else {
+            if (p3 && t3) mapping[3] = t3;
+            if (p4 && t4) mapping[4] = t4;
+        }
+        return mapping;
+    };
+
+    // --- GAME FLOW ---
+
+    const goToNameEntry = () => {
+        setView('name-entry');
+    };
+
+    const startDailyChallenge = () => {
+        if (!playerName.trim()) {
+            alert("Please enter a name!");
+            return;
+        }
+        setMode('season');
+        setCurrentDrillIndex(0);
+        setScore(0);
+        const firstDrill = DAILY_PLAYLIST[0];
+        setCurrentZone(firstDrill.zone);
+        setGameState('playing');
+        setupBoard(BASE_SCENARIOS[firstDrill.scenarioIndex], firstDrill.zone, 'season', 0);
+        setView('game');
+        setShowStrategyModal(false);
+    };
+
+    const startTutorial = () => {
+        setMode('tutorial');
+        setCurrentDrillIndex(0);
+        setCurrentZone("2-3");
+        setGameState('playing');
+        setupBoard(TUTORIAL_SCENARIOS[0], "2-3", 'tutorial', 0);
+        setView('game');
+        setShowStrategyModal(false);
+    };
+
+    const startPractice = () => {
+        setMode('practice');
+        setCurrentDrillIndex(0);
+        setGameState('playing');
+        setupBoard(BASE_SCENARIOS[0], practiceConfig.zone, 'practice', 0);
+        setView('game');
+        setShowStrategyModal(false);
+    };
+
+    const setupBoard = (scenario, zoneName, currentMode, drillIndex) => {
+        let lockedIds = [];
+        
+        if (currentMode === 'tutorial') {
+            lockedIds = scenario.lockedIds || [];
+        } else if (currentMode === 'season') {
+            if (drillIndex === 0) lockedIds = [2, 3, 4, 5]; 
+            else if (drillIndex === 1) lockedIds = [3, 4, 5]; 
+            else if (drillIndex === 2) lockedIds = [4, 5];    
+        }
+        
+        let style = 'Pressure';
+        if (currentMode === 'practice') style = practiceConfig.style;
+        else if (currentMode === 'season') style = DAILY_PLAYLIST[drillIndex].style;
+
+        const targets = getTargets(scenario, zoneName, style);
+        const newPlayers = [1, 2, 3, 4, 5].map(id => {
+            if (lockedIds.includes(id)) {
+                const t = targets.find(p => p.id === id);
+                return { ...t, locked: true };
+            }
+            return { id, x: 40 + (id * 5), y: 8, locked: false };
+        });
+        setPlayers(newPlayers);
+        setSelectedId(null);
+    };
+
+    const handleTapCourt = (e) => {
+        if (gameState !== 'playing' || !selectedId || !courtRef.current) return;
+        const rect = courtRef.current.getBoundingClientRect();
+        const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+        const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+        const yCourt = (yPct / 100) * VIEW_HEIGHT;
+        const clampedX = Math.max(2, Math.min(98, xPct));
+        const clampedY = Math.max(2, Math.min(VIEW_HEIGHT - 2, yCourt));
+        setPlayers(prev => prev.map(p => p.id === selectedId ? { ...p, x: clampedX, y: clampedY } : p));
+        setSelectedId(null);
+    };
+
+    const submit = async () => {
+        setSelectedId(null);
+        
+        let activeScen, activeStyle, activeZ;
+
+        if (mode === 'season') {
+            const drill = DAILY_PLAYLIST[currentDrillIndex];
+            activeScen = BASE_SCENARIOS[drill.scenarioIndex];
+            activeStyle = drill.style;
+            activeZ = drill.zone;
+        } else if (mode === 'tutorial') {
+            activeScen = TUTORIAL_SCENARIOS[currentDrillIndex];
+            activeStyle = 'Pressure';
+            activeZ = '2-3';
+        } else {
+            activeScen = BASE_SCENARIOS[currentDrillIndex];
+            activeStyle = practiceConfig.style;
+            activeZ = practiceConfig.zone;
+        }
+        
+        let targets = getTargets(activeScen, activeZ, activeStyle);
+        let targetMapping = getBestTargetMapping(players, targets); 
+        
+        let rScore = 0;
+        let activePlayerCount = 0;
+
+        players.forEach(p => {
+            if (!p.locked) {
+                activePlayerCount++;
+                const t = targetMapping[p.id];
+                if (t) {
+                    const d = getDistance(p.x, p.y, t.x, t.y);
+                    rScore += getScoreForDistance(d);
+                }
+            }
+        });
+        
+        setRoundScore(rScore);
+        
+        if (mode === 'season') {
+            setScore(prev => prev + rScore);
+        }
+        
+        if (mode === 'tutorial') {
+            setFeedback(activeScen.tips["2-3"]);
+        } else if (mode === 'practice') {
+            const badPlayers = players.filter(p => !p.locked).map(p => {
+                const t = targetMapping[p.id];
+                const d = t ? getDistance(p.x, p.y, t.x, t.y) : 0;
+                return { id: p.id, score: getScoreForDistance(d) };
+            }).filter(p => p.score < 5);
+
+            if (badPlayers.length === 0) setFeedback("Perfect execution. Defenders locked in.");
+            else setFeedback(`Check spacing for Player ${badPlayers.map(p => p.id).join(", ")}.`);
+        } else {
+            const maxScore = activePlayerCount * 10;
+            setFeedback(getCoachFeedback(rScore, maxScore));
+        }
+
+        setGameState('review');
+    };
+
+    const next = async () => {
+        let maxDrills = 0;
+        if (mode === 'season') maxDrills = DAILY_PLAYLIST.length;
+        else if (mode === 'tutorial') maxDrills = TUTORIAL_SCENARIOS.length;
+        else maxDrills = BASE_SCENARIOS.length;
+
+        if (currentDrillIndex < maxDrills - 1) {
+            const nextIdx = currentDrillIndex + 1;
+            setCurrentDrillIndex(nextIdx);
+            
+            if (mode === 'season') {
+                const drill = DAILY_PLAYLIST[nextIdx];
+                setCurrentZone(drill.zone);
+                setupBoard(BASE_SCENARIOS[drill.scenarioIndex], drill.zone, 'season', nextIdx);
+            } else if (mode === 'practice') {
+                setupBoard(BASE_SCENARIOS[nextIdx], practiceConfig.zone, 'practice', nextIdx);
+            } else {
+                setupBoard(TUTORIAL_SCENARIOS[nextIdx], "2-3", 'tutorial', nextIdx);
+            }
+            setGameState('playing');
+        } else {
+            if (mode === 'tutorial') setView('tutorial-summary');
+            else {
+                if (mode === 'season' && user && db) {
+                    try {
+                        await addDoc(collection(db, 'leaderboard'), {
+                            name: playerName,
+                            score: score + roundScore,
+                            date: new Date().toISOString()
+                        });
+                    } catch (e) { console.error("Error saving score", e); }
+                }
+                setView('complete');
+            }
+        }
+    };
+
+    const renderStrategyContent = (isInline = false) => (
+        <div className={`flex flex-col items-center w-full animate-in slide-in-from-right duration-300 ${isInline ? '' : 'h-full justify-center'}`}>
+            <div className="w-full bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 relative">
+                {!isInline && (
+                    <button onClick={() => setShowStrategyModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-600">
+                        <X size={20} />
+                    </button>
+                )}
+                <div className="flex items-center gap-2 mb-4">
+                    <BookOpen className="text-blue-600" />
+                    <h2 className="text-2xl font-black text-gray-800">Strategy Guide</h2>
+                </div>
+                
+                {/* Zone Tabs */}
+                <div className="flex gap-2 mb-4 bg-gray-100 p-1 rounded-lg">
+                    {['2-3', '3-2', '1-3-1'].map(z => (
+                        <button 
+                            key={z} 
+                            onClick={() => setSummaryZone(z)} 
+                            className={`flex-1 py-2 text-xs font-bold rounded transition-colors ${summaryZone === z ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            {z}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Zone Content */}
+                <div className="mb-4">
+                    <h3 className="font-bold text-lg text-gray-800 mb-1">{ZONE_INFO[summaryZone].name}</h3>
+                    <p className="text-sm font-bold text-blue-600 mb-3 italic">"{ZONE_INFO[summaryZone].actionPhrase}"</p>
+                    
+                    <div className="text-xs text-gray-600 space-y-3 mb-4">
+                        <p className="leading-relaxed">{ZONE_INFO[summaryZone].desc}</p>
+                        <div className="bg-blue-50 p-2 rounded border border-blue-100">
+                            <span className="font-bold text-blue-800 block mb-1">Key Roles:</span>
+                            <span className="text-blue-700 leading-snug">{ZONE_INFO[summaryZone].roles}</span>
+                        </div>
+                    </div>
+                    
+                    <div className="border-t border-gray-100 pt-3">
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Defensive Adjustments (Tap to see)</h4>
+                        <div className="grid grid-cols-3 gap-2 mb-3">
+                            <button onClick={() => setSummaryStyle('Contain')} className={`text-center p-2 rounded border-2 transition-all ${summaryStyle === 'Contain' ? 'border-green-500 bg-green-50' : 'border-transparent bg-gray-50'}`}>
+                                <Shield className={`w-5 h-5 mx-auto mb-1 ${summaryStyle === 'Contain' ? 'text-green-600' : 'text-gray-400'}`}/>
+                                <span className={`block text-[10px] font-bold ${summaryStyle === 'Contain' ? 'text-green-800' : 'text-gray-500'}`}>Contain</span>
+                            </button>
+                            <button onClick={() => setSummaryStyle('Pressure')} className={`text-center p-2 rounded border-2 transition-all ${summaryStyle === 'Pressure' ? 'border-blue-500 bg-blue-50' : 'border-transparent bg-gray-50'}`}>
+                                <Target className={`w-5 h-5 mx-auto mb-1 ${summaryStyle === 'Pressure' ? 'text-blue-600' : 'text-gray-400'}`}/>
+                                <span className={`block text-[10px] font-bold ${summaryStyle === 'Pressure' ? 'text-blue-800' : 'text-gray-500'}`}>Pressure</span>
+                            </button>
+                            <button onClick={() => setSummaryStyle('Trap')} className={`text-center p-2 rounded border-2 transition-all ${summaryStyle === 'Trap' ? 'border-orange-500 bg-orange-50' : 'border-transparent bg-gray-50'}`}>
+                                <Zap className={`w-5 h-5 mx-auto mb-1 ${summaryStyle === 'Trap' ? 'text-orange-600' : 'text-gray-400'}`}/>
+                                <span className={`block text-[10px] font-bold ${summaryStyle === 'Trap' ? 'text-orange-800' : 'text-gray-500'}`}>Trap</span>
+                            </button>
+                        </div>
+                        
+                        <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                            <p className="text-xs font-bold text-gray-800 mb-1">{summaryStyle} in {summaryZone}:</p>
+                            <p className="text-xs text-gray-600 italic">"{ZONE_INFO[summaryZone].variations[summaryStyle]}"</p>
+                        </div>
+                    </div>
+                </div>
+
+                {isInline && (
+                    <button onClick={goToNameEntry} className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-orange-700 active:scale-95 transition-all flex items-center justify-center gap-2">
+                        Start Daily Challenge <ChevronRight/>
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+
+    // Determine active data based on mode
+    let activeScenario, activeZone, activeStyle;
+    if (mode === 'season') {
+        const drill = DAILY_PLAYLIST[currentDrillIndex];
+        activeScenario = BASE_SCENARIOS[drill.scenarioIndex];
+        activeZone = drill.zone;
+        activeStyle = drill.style;
+    } else if (mode === 'tutorial') {
+        activeScenario = TUTORIAL_SCENARIOS[currentDrillIndex];
+        activeZone = "2-3";
+        activeStyle = "Pressure";
+    } else {
+        activeScenario = BASE_SCENARIOS[currentDrillIndex];
+        activeZone = practiceConfig.zone;
+        activeStyle = practiceConfig.style;
+    }
+    
+    const rawTargets = getTargets(activeScenario, activeZone, activeStyle);
+    const targetMapping = gameState === 'review' ? getBestTargetMapping(players, rawTargets) : {};
+    const displayTargets = rawTargets;
+
+    return (
+        <div className="flex flex-col items-center min-h-screen font-sans selection:bg-orange-200 relative bg-gray-100">
+            
+            {/* STRATEGY MODAL OVERLAY */}
+            {showStrategyModal && (
+                <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    {renderStrategyContent(false)}
+                </div>
+            )}
+
+            {/* COMPACT HEADER */}
+            <div className="w-full max-w-md bg-white p-4 shadow-sm border-b border-gray-200 sticky top-0 z-20 flex justify-between items-center">
+                <button 
+                    onClick={() => setView('welcome')} 
+                    className="text-xl font-bold text-gray-800 flex items-center gap-2 hover:text-blue-600 transition-colors"
+                >
+                    <Clipboard className="w-5 h-5" /> zOWNed
+                </button>
+                <div className="flex gap-2">
+                    <button onClick={() => setShowStrategyModal(true)} className="bg-gray-100 text-gray-600 px-3 py-1 rounded text-xs font-bold flex items-center gap-1 hover:bg-gray-200">
+                        <BookOpen className="w-3 h-3" /> Strategy
+                    </button>
+                    {mode === 'season' && view === 'game' && (
+                        <div className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${score >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            <Trophy className="w-3 h-3" /> {score}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="w-full max-w-md p-4 flex-grow flex flex-col items-center">
+
+                {/* 1. WELCOME & LEADERBOARD */}
+                {view === 'welcome' && (
+                    <div className="flex flex-col items-center w-full h-full animate-in fade-in zoom-in duration-300">
+                        <div className="mt-8 mb-6 flex flex-col items-center">
+                            {/* Replaced image with placeholder text/icon for now as the asset is missing locally */}
+                            <div className="w-48 mb-4 h-24 flex items-center justify-center bg-gray-200 rounded text-gray-400 font-bold">
+                                zOWNed LOGO
+                            </div>
+                            <p className="text-xs text-gray-500">Master defensive spacing.</p>
+                        </div>
+
+                        <div className="w-full space-y-4 mb-8">
+                            <button onClick={startTutorial} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><GraduationCap className="w-5 h-5"/> Rookie Camp</button>
+                            <button onClick={goToNameEntry} className="w-full bg-orange-600 text-white py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Trophy className="w-5 h-5"/> Daily Challenge</button>
+                            <button onClick={() => setView('practice-info')} className="w-full bg-white text-gray-700 border-2 border-gray-200 py-3 rounded-xl font-bold shadow-sm flex justify-center gap-2 text-sm"><Layout className="w-5 h-5"/> Practice Lab</button>
+                        </div>
+
+                        <div className="w-full bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex-grow flex flex-col min-h-[200px]">
+                            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-bold text-xs text-gray-500 uppercase tracking-wider flex justify-between">
+                                <span>Daily Stack Ranking</span>
+                                <span>IQ Score</span>
+                            </div>
+                            <div className="overflow-y-auto flex-grow scrollbar-hide">
+                                {leaderboard.length > 0 ? (
+                                    leaderboard.map((entry, i) => (
+                                        <div key={i} className="flex justify-between items-center px-4 py-3 border-b border-gray-100 last:border-0 text-sm">
+                                            <div className="flex items-center gap-3">
+                                                <span className={`font-bold w-4 ${i < 3 ? 'text-orange-500' : 'text-gray-400'}`}>{i+1}</span>
+                                                <span className="font-semibold text-gray-700">{entry.name}</span>
+                                            </div>
+                                            <span className="font-mono font-bold text-blue-600">{entry.score}</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="p-6 text-center text-sm text-gray-400 italic">No scores yet today. Be the first!</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 1.5 NAME ENTRY */}
+                {view === 'name-entry' && (
+                    <div className="flex flex-col items-center justify-center w-full h-full animate-in slide-in-from-right duration-300">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-6">Enter Player Name</h2>
+                        <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6">
+                            <div className="flex items-center border-2 border-blue-100 rounded-xl px-4 py-3 bg-blue-50">
+                                <User className="w-5 h-5 text-blue-400 mr-3" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Your Name / Gamertag" 
+                                    value={playerName}
+                                    onChange={(e) => setPlayerName(e.target.value)}
+                                    className="bg-transparent w-full outline-none text-gray-800 font-bold text-lg"
+                                    autoFocus
+                                />
+                            </div>
+                            <p className="text-xs text-gray-400 mt-3 text-center">This name will appear on the Daily Stack.</p>
+                        </div>
+                        <button onClick={startDailyChallenge} className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-orange-700 active:scale-95 transition-all">Start Daily Challenge</button>
+                        <button onClick={() => setView('welcome')} className="mt-6 text-sm text-gray-400 font-bold hover:text-gray-600">Back</button>
+                    </div>
+                )}
+
+                {/* 2. PRACTICE INFO */}
+                {view === 'practice-info' && (
+                    <div className="flex flex-col items-center w-full animate-in slide-in-from-right duration-300">
+                        <h2 className="text-2xl font-black text-gray-800 mb-6">Lab Overview</h2>
+                        <div className="w-full space-y-3 mb-8">
+                            {['Pressure', 'Contain', 'Trap'].map(s => (
+                                <div key={s} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
+                                    <div className="bg-blue-50 p-3 rounded-full text-blue-600 mr-4">
+                                        {s==='Pressure'?<Target size={20}/>:s==='Contain'?<Shield size={20}/>:<Zap size={20}/>}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-800 text-base">{s}</h3>
+                                        <p className="text-xs text-gray-500 leading-tight mt-1">
+                                            {s==='Pressure'?'Standard. Deny 3s.':s==='Contain'?'Pack paint. No layups.': 'Aggressive. Double ball.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={startPractice} className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2">Enter Lab <ChevronRight size={20} className="inline"/></button>
+                        <button onClick={() => setView('welcome')} className="mt-6 text-gray-400 text-sm font-bold">Back</button>
+                    </div>
+                )}
+
+                {/* TUTORIAL SUMMARY */}
+                {view === 'tutorial-summary' && renderStrategyContent(true)}
+
+                {/* 3. GAMEPLAY */}
+                {view === 'game' && (
+                    <React.Fragment>
+                        {/* INFO/CONTROLS */}
+                        {mode === 'practice' ? (
+                            <div className="bg-white p-4 rounded-lg shadow-sm w-full mb-4 border border-gray-200">
+                                <div className="flex justify-between items-center mb-3">
+                                     <span className="text-xs uppercase font-bold text-gray-400 tracking-wider flex items-center gap-1"><Settings size={14}/> Lab Settings</span>
+                                     <span className="text-xs font-bold text-orange-600 uppercase tracking-wide">{activeScenario.name}</span>
+                                </div>
+                                <div className="flex gap-2 mb-3">
+                                    {['2-3', '3-2', '1-3-1'].map(z => (
+                                        <button key={z} onClick={() => setPracticeConfig(p => ({...p, zone: z}))} className={`flex-1 py-2 text-xs font-bold rounded transition-colors ${practiceConfig.zone === z ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{z}</button>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2">
+                                    {['Contain', 'Pressure', 'Trap'].map(s => (
+                                        <button key={s} onClick={() => setPracticeConfig(p => ({...p, style: s}))} className={`flex-1 py-2 text-xs font-bold rounded transition-colors ${practiceConfig.style === s ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{s}</button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white p-4 rounded-lg shadow-sm w-full mb-4 text-center border border-gray-200">
+                                <span className="block text-xs uppercase tracking-wider text-gray-400 font-bold mb-1">{mode === 'tutorial' ? 'Rookie Camp' : 'Daily Challenge'}</span>
+                                <h2 className="text-2xl font-black text-gray-800 mb-1">{activeZone} ZONE</h2>
+                                
+                                {/* NEW STRATEGY INDICATOR */}
+                                <div className="mb-2">
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide ${
+                                        activeStyle === 'Trap' ? 'bg-orange-100 text-orange-800' :
+                                        activeStyle === 'Contain' ? 'bg-green-100 text-green-800' :
+                                        'bg-blue-100 text-blue-800'
+                                    }`}>
+                                        {activeStyle} STRATEGY
+                                    </span>
+                                </div>
+
+                                <p className="text-sm text-gray-600">Ball: <span className="font-semibold text-orange-600">{activeScenario.name}</span></p>
+                            </div>
+                        )}
+
+                        {/* ORIGINAL ASPECT RATIO COURT */}
+                        <div ref={courtRef} onClick={handleTapCourt} className={`relative w-full aspect-[4/3] bg-white rounded-xl shadow-lg border-4 border-gray-800 overflow-hidden transition-colors ${selectedId ? 'cursor-crosshair border-blue-400 ring-2 ring-blue-200' : ''}`} style={{ backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+                            
+                            {/* SPAWN ZONE */}
+                            {gameState === 'playing' && <div className="absolute top-0 left-0 w-full h-[15%] bg-blue-50/50 border-b border-blue-100 flex items-start justify-center pt-1"><span className="text-[10px] uppercase font-bold text-blue-300 tracking-widest">Bench</span></div>}
+
+                            {/* SVG COURT */}
+                            <svg viewBox={`0 0 100 ${VIEW_HEIGHT}`} className="absolute inset-0 w-full h-full pointer-events-none opacity-40 z-10">
+                                <line x1="0" y1="98" x2="100" y2="98" stroke="black" strokeWidth="1" />
+                                <rect x="35" y="0" width="30" height="38" fill="none" stroke="black" strokeWidth="1" />
+                                <path d="M 35 38 A 15 15 0 0 0 65 38" fill="none" stroke="black" strokeWidth="1" strokeDasharray="4 4" />
+                                <path d="M 35 38 A 15 15 0 0 1 65 38" fill="none" stroke="black" strokeWidth="1" />
+                                <path d="M 10 0 L 10 15 A 40 40 0 0 0 90 15 L 90 0" fill="none" stroke="black" strokeWidth="1" />
+                                <line x1="45" y1="4" x2="55" y2="4" stroke="black" strokeWidth="1" />
+                                <circle cx="50" cy="7" r="1.5" stroke="black" strokeWidth="1" fill="none" />
+                            </svg>
+
+                            {/* BALL */}
+                            <div className="absolute w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-white text-xs shadow-sm transform -translate-x-1/2 -translate-y-1/2 z-10" style={{ left: `${activeScenario.ballPos.x}%`, top: toPct(activeScenario.ballPos.y) }}></div>
+
+                            {/* GHOSTS - Z-30 Top Layer, Dynamic Color */}
+                            {(gameState === 'review' || (mode === 'tutorial' && gameState === 'playing')) && displayTargets.map(t => {
+                                const isOverlapped = players.some(p => getDistance(p.x, p.y, t.x, t.y) < 6);
+                                return (
+                                    <div key={`ghost-${t.id}`} className={`absolute w-12 h-12 rounded-full border-2 border-green-500 border-dashed flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none ${mode === 'tutorial' && gameState === 'playing' ? 'animate-pulse-target' : ''}`} style={{ left: `${t.x}%`, top: toPct(t.y) }}>
+                                        <span className={`font-bold text-lg ${isOverlapped ? 'text-white drop-shadow-md' : 'text-green-700'}`}>{t.id}</span>
+                                    </div>
+                                );
+                            })}
+
+                            {/* PLAYERS */}
+                            {players.map(p => {
+                                const t = gameState === 'review' ? targetMapping[p.id] : null;
+                                let bg = 'bg-blue-600';
+                                if (gameState === 'review' && !p.locked && t) {
+                                    const s = getScoreForDistance(getDistance(p.x, p.y, t.x, t.y));
+                                    bg = s >= 10 ? 'bg-green-600' : s > 0 ? 'bg-yellow-500' : 'bg-red-600';
+                                }
+                                return (
+                                    <div key={p.id} onClick={(e) => { if(gameState==='playing'&&!p.locked){ e.stopPropagation(); setSelectedId(selectedId===p.id?null:p.id); } }} className={`absolute w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-lg transform -translate-x-1/2 -translate-y-1/2 transition-all z-20 border-2 border-white ${p.locked ? 'bg-blue-900 opacity-80 cursor-default' : selectedId === p.id ? 'bg-blue-500 scale-110 ring-2 ring-white cursor-pointer' : `${bg} cursor-pointer`}`} style={{ left: `${p.x}%`, top: toPct(p.y) }}>
+                                        {p.id}
+                                        {p.locked && <Lock className="w-3 h-3 absolute -top-1 -right-1 text-blue-200" />}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* ORIGINAL FEEDBACK SPACING */}
+                        <div className="w-full mt-4">
+                            {gameState === 'playing' ? (
+                                <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg flex items-center gap-3">
+                                    {selectedId ? (
+                                        <>
+                                            <Hand className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                            <p className="text-sm text-blue-800">Tap court to place Player {selectedId}.</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Info className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                            <p className="text-sm text-blue-800">
+                                                {players.filter(p => !p.locked).length === 5 
+                                                    ? "Tap a player to select." 
+                                                    : "Move the active players into position."}
+                                            </p>
+                                        </>
+                                    )}
+                                    <button onClick={submit} className="ml-auto bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-md">Submit</button>
+                                </div>
+                            ) : (
+                                <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className={`font-bold text-lg ${mode === 'season' ? (roundScore >= 0 ? 'text-green-800' : 'text-red-800') : 'text-gray-800'}`}>
+                                            {mode === 'season' ? `Result: ${roundScore > 0 ? '+' : ''}${roundScore}` : 'Analysis:'}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-gray-700 italic border-l-4 border-green-500 pl-3 mb-2">"{feedback}"</p>
+                                    {mode === 'practice' && (
+                                        <div className="mt-2 pt-2 border-t border-blue-100 flex gap-2">
+                                            <Lightbulb className="w-4 h-4 text-blue-600 mt-0.5" />
+                                            <p className="text-xs text-blue-800 leading-snug">{ZONE_INFO[activeZone].variations[activeStyle]}</p>
+                                        </div>
+                                    )}
+                                    <button onClick={next} className="w-full mt-3 bg-orange-600 text-white py-3 rounded-xl text-sm font-bold shadow-md">Next Drill</button>
+                                </div>
+                            )}
+                        </div>
+                    </React.Fragment>
+                )}
+
+                {/* 4. COMPLETE */}
+                {view === 'complete' && (
+                    <div className="flex flex-col items-center justify-center h-full w-full py-10 animate-in zoom-in duration-300">
+                        <Trophy className={`w-24 h-24 mb-6 drop-shadow-md ${mode === 'season' && score > 0 ? 'text-yellow-500' : 'text-gray-400'}`} />
+                        <h2 className="text-3xl font-black text-gray-900 mb-2">{mode === 'season' ? 'Daily Challenge Complete!' : 'Practice Done!'}</h2>
+                        {mode === 'season' && (
+                            <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 text-center w-full mb-6">
+                                <span className="block text-gray-500 text-sm uppercase font-bold tracking-wider mb-2">Net Defensive Rating</span>
+                                <span className={`block text-6xl font-black mb-2 ${score >= 0 ? 'text-orange-600' : 'text-red-600'}`}>{score}</span>
+                                <span className="block text-sm text-gray-400 font-bold">{playerName}</span>
+                            </div>
+                        )}
+                        <button onClick={() => setView('welcome')} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2 mb-3">Return Home</button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+export default DefenseIQApp;
